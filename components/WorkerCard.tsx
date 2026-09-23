@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import type { WorkerProfile } from "@/types";
 import { formatCurrency, SKILL_LABELS, SKILL_ICONS } from "@/lib/utils";
 
@@ -38,15 +39,19 @@ export function WorkerCard({ worker, onPress }: Props) {
           </View>
 
           {worker.city && (
-            <Text style={styles.location}>📍 {worker.city}</Text>
+            <View style={styles.locationRow}>
+              <MaterialCommunityIcons name="map-marker" size={12} color="#6b7280" />
+              <Text style={styles.location}>{worker.city}</Text>
+            </View>
           )}
 
           <View style={styles.skills}>
             {worker.skills.slice(0, 3).map((skill) => (
               <View key={skill} style={styles.skillTag}>
-                <Text style={styles.skillText}>
-                  {SKILL_ICONS[skill]} {SKILL_LABELS[skill]}
-                </Text>
+                <View style={styles.skillInner}>
+                  <MaterialCommunityIcons name={SKILL_ICONS[skill]} size={11} color="#4b5563" />
+                  <Text style={styles.skillText}>{SKILL_LABELS[skill]}</Text>
+                </View>
               </View>
             ))}
           </View>
@@ -116,6 +121,8 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: "600", color: "#111827", flex: 1 },
   wage: { fontSize: 13, fontWeight: "700", color: "#16a34a", marginLeft: 8 },
   location: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  locationRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 },
+  skillInner: { flexDirection: "row", alignItems: "center", gap: 3 },
   skills: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 6 },
   skillTag: {
     backgroundColor: "#f3f4f6",

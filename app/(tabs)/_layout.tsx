@@ -1,13 +1,25 @@
 import { Tabs } from "expo-router";
-import { Text } from "react-native";
+import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { useAuthStore } from "@/store/authStore";
 import { useAppTranslation } from "@/hooks/useAppTranslation";
 
-function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
+function TabIcon({
+  focused,
+  color,
+  activeIcon,
+  inactiveIcon,
+}: {
+  focused: boolean;
+  color: string;
+  activeIcon: string;
+  inactiveIcon: string;
+}) {
   return (
-    <Text style={{ fontSize: focused ? 22 : 20, opacity: focused ? 1 : 0.6 }}>
-      {emoji}
-    </Text>
+    <MaterialCommunityIcons
+      name={focused ? activeIcon : inactiveIcon}
+      size={24}
+      color={color}
+    />
   );
 }
 
@@ -22,14 +34,18 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: t("nav.home"),
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon focused={focused} color={color} activeIcon="home" inactiveIcon="home-outline" />
+          ),
         }}
       />
       <Tabs.Screen
         name="workers"
         options={{
           title: t("nav.workers"),
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👷" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon focused={focused} color={color} activeIcon="account-hard-hat" inactiveIcon="account-hard-hat" />
+          ),
           href: isWorker ? null : undefined,
         }}
       />
@@ -37,14 +53,27 @@ export default function TabsLayout() {
         name="jobs"
         options={{
           title: t("nav.jobs"),
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💼" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon focused={focused} color={color} activeIcon="briefcase" inactiveIcon="briefcase-outline" />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: "Chats",
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon focused={focused} color={color} activeIcon="chat" inactiveIcon="chat-outline" />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: t("nav.profile"),
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon focused={focused} color={color} activeIcon="account-circle" inactiveIcon="account-circle-outline" />
+          ),
         }}
       />
     </Tabs>

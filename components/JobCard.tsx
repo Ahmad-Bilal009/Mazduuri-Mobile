@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import type { Job } from "@/types";
 import { formatCurrency, DURATION_LABELS, timeAgo } from "@/lib/utils";
 
@@ -26,22 +27,24 @@ export function JobCard({ job, onPress }: Props) {
         </View>
       </View>
 
-      <Text style={styles.description} numberOfLines={2}>
-        {job.description}
-      </Text>
-
       <View style={styles.meta}>
-        <Text style={styles.wage}>💰 {formatCurrency(job.budget)}/day</Text>
-        {job.location.city && (
-          <Text style={styles.metaItem}>📍 {job.location.city}</Text>
+        <Text style={styles.wage}>Rs. {formatCurrency(job.budget)}/day</Text>
+        {job.city && (
+          <View style={styles.metaIconRow}>
+            <MaterialCommunityIcons name="map-marker" size={12} color="#6b7280" />
+            <Text style={styles.metaItem}>{job.city}</Text>
+          </View>
         )}
-        <Text style={styles.metaItem}>⏱ {DURATION_LABELS[job.duration]}</Text>
+        <View style={styles.metaIconRow}>
+          <MaterialCommunityIcons name="clock-outline" size={12} color="#6b7280" />
+          <Text style={styles.metaItem}>{DURATION_LABELS[job.duration]}</Text>
+        </View>
       </View>
 
       <View style={styles.footer}>
         <Text style={styles.time}>{timeAgo(job.createdAt)}</Text>
-        {job.applicants && (
-          <Text style={styles.applicants}>{job.applicants.length} applied</Text>
+        {job.applications && (
+          <Text style={styles.applicants}>{job.applications.length} applied</Text>
         )}
       </View>
     </TouchableOpacity>
@@ -75,13 +78,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     alignSelf: "flex-start",
   },
-  description: {
-    fontSize: 13,
-    color: "#4b5563",
-    lineHeight: 18,
-    marginBottom: 8,
-  },
-  meta: { flexDirection: "row", gap: 12, flexWrap: "wrap", marginBottom: 8 },
+  meta: { flexDirection: "row", gap: 12, flexWrap: "wrap", marginBottom: 8, alignItems: "center" },
+  metaIconRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   wage: { fontSize: 13, fontWeight: "700", color: "#16a34a" },
   metaItem: { fontSize: 12, color: "#6b7280" },
   footer: {

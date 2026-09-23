@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "734501861832",
+    "project_id": "mazduuri-df95b",
+    "storage_bucket": "mazduuri-df95b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:734501861832:android:eb3d7ef3f5a4446d7728fd",
+        "android_client_info": {
+          "package_name": "com.mazduuri.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpM4GRz7u7lZbLFcbsst697UTIPt5Qvjo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

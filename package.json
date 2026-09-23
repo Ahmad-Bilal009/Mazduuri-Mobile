@@ -4,33 +4,49 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "type-check": "tsc --noEmit"
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "type-check": "tsc --noEmit",
+    "android-development": "eas build --profile development --platform android",
+    "android-local": "eas build --platform android --profile preview --local ",
+    "preview-build": "eas build -p android --profile preview",
+    "ios-build": "eas build -p ios --profile production --auto-submit"
   },
   "dependencies": {
     "@expo-google-fonts/noto-nastaliq-urdu": "^0.4.2",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "^55.0.15",
-    "expo-font": "~55.0.7",
-    "expo-image-picker": "~55.0.20",
-    "expo-linking": "^55.0.15",
-    "expo-localization": "~55.0.13",
-    "expo-location": "~55.1.8",
-    "expo-router": "~55.0.12",
+    "@react-native-google-signin/google-signin": "^16.1.5",
+    "@types/react-native-vector-icons": "^6.4.18",
+    "expo": "~55.0.27",
+    "expo-asset": "~55.0.17",
+    "expo-audio": "~55.0.15",
+    "expo-device": "~55.0.21",
+    "expo-font": "~55.0.8",
+    "expo-image-picker": "~55.0.21",
+    "expo-linking": "~55.0.16",
+    "expo-localization": "~55.0.16",
+    "expo-location": "~55.1.11",
+    "expo-notifications": "~55.0.27",
+    "expo-router": "~55.0.16",
     "expo-status-bar": "~55.0.5",
-    "expo-updates": "~55.0.21",
+    "expo-updates": "~55.0.25",
     "i18next": "^26.0.10",
-    "react": "19.2.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "react-i18next": "^17.0.7",
-    "react-native": "0.83.4",
+    "react-native": "0.83.6",
+    "react-native-maps": "^1.27.2",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
+    "react-native-vector-icons": "^10.3.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.2.10",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "expo-asset": "~55.0.17"
   }
 }

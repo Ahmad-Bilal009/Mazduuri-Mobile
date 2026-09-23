@@ -1,0 +1,440 @@
+[
+  {
+    "id": "construction_building",
+    "name": "Construction & Building",
+    "icon": "🏗",
+    "subcategories": [
+      { "id": "mason", "name": "Mason (Raj Mistri)" },
+      { "id": "construction_labour", "name": "Construction Labour" },
+      { "id": "tile_fixer", "name": "Tile Fixer" },
+      { "id": "marble_installer", "name": "Marble Installer" },
+      { "id": "bricklayer", "name": "Bricklayer" },
+      { "id": "concrete_worker", "name": "Concrete Worker" },
+      { "id": "steel_fixer", "name": "Steel Fixer" },
+      { "id": "scaffolding_worker", "name": "Scaffolding Worker" },
+      { "id": "roof_installer", "name": "Roof Installer" },
+      { "id": "ceiling_installer", "name": "Ceiling Installer" },
+      { "id": "pop_gypsum_worker", "name": "POP/Gypsum Worker" },
+      { "id": "waterproofing_expert", "name": "Waterproofing Expert" },
+      { "id": "road_construction_worker", "name": "Road Construction Worker" },
+      { "id": "asphalt_worker", "name": "Asphalt Worker" },
+      { "id": "excavator_operator", "name": "Excavator Operator" },
+      { "id": "crane_operator", "name": "Crane Operator" },
+      { "id": "loader_operator", "name": "Loader Operator" }
+    ]
+  },
+  {
+    "id": "electrical",
+    "name": "Electrical",
+    "icon": "⚡",
+    "subcategories": [
+      { "id": "electrician", "name": "Electrician" },
+      { "id": "industrial_electrician", "name": "Industrial Electrician" },
+      { "id": "solar_panel_installer", "name": "Solar Panel Installer" },
+      { "id": "solar_maintenance", "name": "Solar Maintenance" },
+      { "id": "ups_technician", "name": "UPS Technician" },
+      { "id": "inverter_technician", "name": "Inverter Technician" },
+      { "id": "generator_mechanic", "name": "Generator Mechanic" },
+      { "id": "cctv_installer", "name": "CCTV Installer" },
+      { "id": "security_system_installer", "name": "Security System Installer" },
+      { "id": "smart_home_installer", "name": "Smart Home Installer" },
+      { "id": "wiring_specialist", "name": "Wiring Specialist" },
+      { "id": "street_light_technician", "name": "Street Light Technician" }
+    ]
+  },
+  {
+    "id": "plumbing",
+    "name": "Plumbing",
+    "icon": "🚰",
+    "subcategories": [
+      { "id": "plumber", "name": "Plumber" },
+      { "id": "pipe_fitter", "name": "Pipe Fitter" },
+      { "id": "drain_cleaner", "name": "Drain Cleaner" },
+      { "id": "sewer_technician", "name": "Sewer Technician" },
+      { "id": "water_pump_technician", "name": "Water Pump Technician" },
+      { "id": "water_tank_cleaner", "name": "Water Tank Cleaner" },
+      { "id": "bore_water_technician", "name": "Bore Water Technician" },
+      { "id": "water_filtration_installer", "name": "Water Filtration Installer" },
+      { "id": "bathroom_fitting_specialist", "name": "Bathroom Fitting Specialist" }
+    ]
+  },
+  {
+    "id": "painting_finishing",
+    "name": "Painting & Finishing",
+    "icon": "🎨",
+    "subcategories": [
+      { "id": "house_painter", "name": "House Painter" },
+      { "id": "spray_painter", "name": "Spray Painter" },
+      { "id": "wall_texture_expert", "name": "Wall Texture Expert" },
+      { "id": "wallpaper_installer", "name": "Wallpaper Installer" },
+      { "id": "polish_worker", "name": "Polish Worker" },
+      { "id": "furniture_painter", "name": "Furniture Painter" },
+      { "id": "signboard_painter", "name": "Signboard Painter" }
+    ]
+  },
+  {
+    "id": "carpentry_wood",
+    "name": "Carpentry & Wood",
+    "icon": "🪚",
+    "subcategories": [
+      { "id": "carpenter", "name": "Carpenter" },
+      { "id": "furniture_maker", "name": "Furniture Maker" },
+      { "id": "cabinet_maker", "name": "Cabinet Maker" },
+      { "id": "door_installer", "name": "Door Installer" },
+      { "id": "window_installer", "name": "Window Installer" },
+      { "id": "kitchen_cabinet_specialist", "name": "Kitchen Cabinet Specialist" },
+      { "id": "sofa_repair", "name": "Sofa Repair" },
+      { "id": "bed_repair", "name": "Bed Repair" },
+      { "id": "wooden_flooring_installer", "name": "Wooden Flooring Installer" }
+    ]
+  },
+  {
+    "id": "metal_welding",
+    "name": "Metal & Welding",
+    "icon": "🔩",
+    "subcategories": [
+      { "id": "welder", "name": "Welder" },
+      { "id": "steel_fabricator", "name": "Steel Fabricator" },
+      { "id": "aluminum_worker", "name": "Aluminum Worker" },
+      { "id": "stainless_steel_worker", "name": "Stainless Steel Worker" },
+      { "id": "gate_maker", "name": "Gate Maker" },
+      { "id": "grill_maker", "name": "Grill Maker" },
+      { "id": "window_fabricator", "name": "Window Fabricator" },
+      { "id": "iron_furniture_maker", "name": "Iron Furniture Maker" }
+    ]
+  },
+  {
+    "id": "drivers",
+    "name": "Drivers",
+    "icon": "🚗",
+    "subcategories": [
+      { "id": "car_driver", "name": "Car Driver" },
+      { "id": "bike_rider", "name": "Bike Rider" },
+      { "id": "loader_driver", "name": "Loader Driver" },
+      { "id": "truck_driver", "name": "Truck Driver" },
+      { "id": "tractor_driver", "name": "Tractor Driver" },
+      { "id": "rickshaw_driver", "name": "Rickshaw Driver" },
+      { "id": "delivery_rider", "name": "Delivery Rider" },
+      { "id": "school_driver", "name": "School Driver" },
+      { "id": "personal_driver", "name": "Personal Driver" },
+      { "id": "family_driver", "name": "Family Driver" }
+    ]
+  },
+  {
+    "id": "transport_logistics",
+    "name": "Transport & Logistics",
+    "icon": "🚚",
+    "subcategories": [
+      { "id": "goods_loader", "name": "Goods Loader" },
+      { "id": "goods_unloader", "name": "Goods Unloader" },
+      { "id": "house_shifting_helper", "name": "House Shifting Helper" },
+      { "id": "packers", "name": "Packers" },
+      { "id": "movers", "name": "Movers" },
+      { "id": "warehouse_worker", "name": "Warehouse Worker" },
+      { "id": "forklift_operator", "name": "Forklift Operator" }
+    ]
+  },
+  {
+    "id": "cleaning",
+    "name": "Cleaning",
+    "icon": "🧹",
+    "subcategories": [
+      { "id": "house_cleaner", "name": "House Cleaner" },
+      { "id": "office_cleaner", "name": "Office Cleaner" },
+      { "id": "deep_cleaning", "name": "Deep Cleaning" },
+      { "id": "carpet_cleaning", "name": "Carpet Cleaning" },
+      { "id": "sofa_cleaning", "name": "Sofa Cleaning" },
+      { "id": "water_tank_cleaning", "name": "Water Tank Cleaning" },
+      { "id": "glass_cleaner", "name": "Glass Cleaner" },
+      { "id": "pressure_washing", "name": "Pressure Washing" },
+      { "id": "pest_control", "name": "Pest Control" },
+      { "id": "garbage_removal", "name": "Garbage Removal" }
+    ]
+  },
+  {
+    "id": "cooking",
+    "name": "Cooking",
+    "icon": "👩‍🍳",
+    "subcategories": [
+      { "id": "home_cook", "name": "Home Cook" },
+      { "id": "event_cook", "name": "Event Cook" },
+      { "id": "bbq_expert", "name": "BBQ Expert" },
+      { "id": "tandoor_cook", "name": "Tandoor Cook" },
+      { "id": "restaurant_cook", "name": "Restaurant Cook" },
+      { "id": "sweet_maker", "name": "Sweet Maker" },
+      { "id": "bakery_worker", "name": "Bakery Worker" },
+      { "id": "kitchen_helper", "name": "Kitchen Helper" }
+    ]
+  },
+  {
+    "id": "domestic_workers",
+    "name": "Domestic Workers",
+    "icon": "🏠",
+    "subcategories": [
+      { "id": "maid", "name": "Maid" },
+      { "id": "housekeeper", "name": "Housekeeper" },
+      { "id": "babysitter", "name": "Babysitter" },
+      { "id": "nanny", "name": "Nanny" },
+      { "id": "elderly_caregiver", "name": "Elderly Caregiver" },
+      { "id": "patient_attendant", "name": "Patient Attendant" },
+      { "id": "laundry_worker", "name": "Laundry Worker" },
+      { "id": "ironing_service", "name": "Ironing Service" }
+    ]
+  },
+  {
+    "id": "agriculture",
+    "name": "Agriculture",
+    "icon": "🌾",
+    "subcategories": [
+      { "id": "farm_labour", "name": "Farm Labour" },
+      { "id": "tractor_operator", "name": "Tractor Operator" },
+      { "id": "harvester_operator", "name": "Harvester Operator" },
+      { "id": "tube_well_operator", "name": "Tube Well Operator" },
+      { "id": "livestock_worker", "name": "Livestock Worker" },
+      { "id": "dairy_farm_worker", "name": "Dairy Farm Worker" },
+      { "id": "poultry_worker", "name": "Poultry Worker" },
+      { "id": "gardener_agri", "name": "Gardener" },
+      { "id": "tree_cutter", "name": "Tree Cutter" },
+      { "id": "irrigation_worker", "name": "Irrigation Worker" }
+    ]
+  },
+  {
+    "id": "gardening_landscaping",
+    "name": "Gardening & Landscaping",
+    "icon": "🌳",
+    "subcategories": [
+      { "id": "gardener", "name": "Gardener" },
+      { "id": "lawn_mower", "name": "Lawn Mower" },
+      { "id": "landscape_designer", "name": "Landscape Designer" },
+      { "id": "tree_pruning", "name": "Tree Pruning" },
+      { "id": "plant_maintenance", "name": "Plant Maintenance" }
+    ]
+  },
+  {
+    "id": "hvac_cooling",
+    "name": "HVAC & Cooling",
+    "icon": "❄️",
+    "subcategories": [
+      { "id": "ac_technician", "name": "AC Technician" },
+      { "id": "ac_installer", "name": "AC Installer" },
+      { "id": "refrigerator_technician", "name": "Refrigerator Technician" },
+      { "id": "freezer_technician", "name": "Freezer Technician" },
+      { "id": "cold_storage_technician", "name": "Cold Storage Technician" },
+      { "id": "ventilation_technician", "name": "Ventilation Technician" }
+    ]
+  },
+  {
+    "id": "electronics_repair",
+    "name": "Electronics Repair",
+    "icon": "📺",
+    "subcategories": [
+      { "id": "tv_repair", "name": "TV Repair" },
+      { "id": "led_repair", "name": "LED Repair" },
+      { "id": "mobile_repair", "name": "Mobile Repair" },
+      { "id": "laptop_repair", "name": "Laptop Repair" },
+      { "id": "computer_repair", "name": "Computer Repair" },
+      { "id": "printer_repair", "name": "Printer Repair" },
+      { "id": "ups_repair", "name": "UPS Repair" },
+      { "id": "generator_repair", "name": "Generator Repair" },
+      { "id": "appliance_repair", "name": "Appliance Repair" }
+    ]
+  },
+  {
+    "id": "vehicle_services",
+    "name": "Vehicle Services",
+    "icon": "🏍",
+    "subcategories": [
+      { "id": "bike_mechanic", "name": "Bike Mechanic" },
+      { "id": "car_mechanic", "name": "Car Mechanic" },
+      { "id": "diesel_mechanic", "name": "Diesel Mechanic" },
+      { "id": "auto_electrician", "name": "Auto Electrician" },
+      { "id": "denting_painting", "name": "Denting & Painting" },
+      { "id": "car_wash", "name": "Car Wash" },
+      { "id": "tyre_repair", "name": "Tyre Repair" },
+      { "id": "wheel_alignment", "name": "Wheel Alignment" },
+      { "id": "oil_change", "name": "Oil Change" }
+    ]
+  },
+  {
+    "id": "security",
+    "name": "Security",
+    "icon": "🔒",
+    "subcategories": [
+      { "id": "security_guard", "name": "Security Guard" },
+      { "id": "watchman", "name": "Watchman" },
+      { "id": "event_security", "name": "Event Security" },
+      { "id": "bodyguard", "name": "Bodyguard" },
+      { "id": "cctv_monitoring", "name": "CCTV Monitoring" }
+    ]
+  },
+  {
+    "id": "events",
+    "name": "Events",
+    "icon": "🎉",
+    "subcategories": [
+      { "id": "event_helper", "name": "Event Helper" },
+      { "id": "decorator", "name": "Decorator" },
+      { "id": "tent_installer", "name": "Tent Installer" },
+      { "id": "sound_system_technician", "name": "Sound System Technician" },
+      { "id": "lighting_technician", "name": "Lighting Technician" },
+      { "id": "photographer_events", "name": "Photographer" },
+      { "id": "videographer", "name": "Videographer" },
+      { "id": "dj", "name": "DJ" },
+      { "id": "waiter", "name": "Waiter" },
+      { "id": "catering_staff", "name": "Catering Staff" }
+    ]
+  },
+  {
+    "id": "office_business_support",
+    "name": "Office & Business Support",
+    "icon": "👔",
+    "subcategories": [
+      { "id": "office_boy", "name": "Office Boy" },
+      { "id": "receptionist", "name": "Receptionist" },
+      { "id": "data_entry_operator", "name": "Data Entry Operator" },
+      { "id": "computer_operator_office", "name": "Computer Operator" },
+      { "id": "office_assistant", "name": "Office Assistant" },
+      { "id": "document_runner", "name": "Document Runner" }
+    ]
+  },
+  {
+    "id": "delivery_services",
+    "name": "Delivery Services",
+    "icon": "📦",
+    "subcategories": [
+      { "id": "food_delivery_rider", "name": "Food Delivery Rider" },
+      { "id": "courier_rider", "name": "Courier Rider" },
+      { "id": "parcel_delivery", "name": "Parcel Delivery" },
+      { "id": "grocery_delivery", "name": "Grocery Delivery" }
+    ]
+  },
+  {
+    "id": "tailoring",
+    "name": "Tailoring",
+    "icon": "🧵",
+    "subcategories": [
+      { "id": "tailor", "name": "Tailor" },
+      { "id": "ladies_tailor", "name": "Ladies Tailor" },
+      { "id": "gents_tailor", "name": "Gents Tailor" },
+      { "id": "boutique_worker", "name": "Boutique Worker" },
+      { "id": "embroidery_worker", "name": "Embroidery Worker" },
+      { "id": "stitching_expert", "name": "Stitching Expert" },
+      { "id": "alteration_specialist", "name": "Alteration Specialist" }
+    ]
+  },
+  {
+    "id": "religious_community",
+    "name": "Religious & Community",
+    "icon": "🕌",
+    "subcategories": [
+      { "id": "quran_teacher_religious", "name": "Quran Teacher" },
+      { "id": "imam", "name": "Imam" },
+      { "id": "mosque_cleaner", "name": "Mosque Cleaner" },
+      { "id": "grave_maintenance", "name": "Grave Maintenance" }
+    ]
+  },
+  {
+    "id": "education",
+    "name": "Education",
+    "icon": "🎓",
+    "subcategories": [
+      { "id": "home_tutor", "name": "Home Tutor" },
+      { "id": "quran_tutor", "name": "Quran Tutor" },
+      { "id": "computer_teacher", "name": "Computer Teacher" },
+      { "id": "english_teacher", "name": "English Teacher" },
+      { "id": "mathematics_tutor", "name": "Mathematics Tutor" },
+      { "id": "science_tutor", "name": "Science Tutor" }
+    ]
+  },
+  {
+    "id": "animal_pet_care",
+    "name": "Animal & Pet Care",
+    "icon": "🐄",
+    "subcategories": [
+      { "id": "livestock_caretaker", "name": "Livestock Caretaker" },
+      { "id": "pet_groomer", "name": "Pet Groomer" },
+      { "id": "pet_sitter", "name": "Pet Sitter" },
+      { "id": "veterinary_assistant", "name": "Veterinary Assistant" }
+    ]
+  },
+  {
+    "id": "digital_freelance",
+    "name": "Digital & Freelance Services",
+    "icon": "📱",
+    "subcategories": [
+      { "id": "graphic_designer", "name": "Graphic Designer" },
+      { "id": "web_developer", "name": "Web Developer" },
+      { "id": "mobile_app_developer", "name": "Mobile App Developer" },
+      { "id": "video_editor", "name": "Video Editor" },
+      { "id": "photographer_digital", "name": "Photographer" },
+      { "id": "content_writer", "name": "Content Writer" },
+      { "id": "social_media_manager", "name": "Social Media Manager" },
+      { "id": "seo_specialist", "name": "SEO Specialist" },
+      { "id": "digital_marketer", "name": "Digital Marketer" },
+      { "id": "computer_operator_digital", "name": "Computer Operator" }
+    ]
+  },
+  {
+    "id": "installation_services",
+    "name": "Installation Services",
+    "icon": "🔧",
+    "subcategories": [
+      { "id": "tv_mount_installer", "name": "TV Mount Installer" },
+      { "id": "curtain_installer", "name": "Curtain Installer" },
+      { "id": "furniture_assembler", "name": "Furniture Assembler" },
+      { "id": "water_filter_installer", "name": "Water Filter Installer" },
+      { "id": "gas_stove_installer", "name": "Gas Stove Installer" },
+      { "id": "internet_technician", "name": "Internet Technician" },
+      { "id": "fiber_optic_installer", "name": "Fiber Optic Installer" }
+    ]
+  },
+  {
+    "id": "factory_industrial",
+    "name": "Factory & Industrial",
+    "icon": "🏭",
+    "subcategories": [
+      { "id": "factory_worker", "name": "Factory Worker" },
+      { "id": "machine_operator", "name": "Machine Operator" },
+      { "id": "packaging_worker", "name": "Packaging Worker" },
+      { "id": "quality_inspector", "name": "Quality Inspector" },
+      { "id": "assembly_line_worker", "name": "Assembly Line Worker" },
+      { "id": "production_helper", "name": "Production Helper" }
+    ]
+  },
+  {
+    "id": "retail",
+    "name": "Retail",
+    "icon": "🏪",
+    "subcategories": [
+      { "id": "cashier", "name": "Cashier" },
+      { "id": "salesman", "name": "Salesman" },
+      { "id": "shop_assistant", "name": "Shop Assistant" },
+      { "id": "store_keeper", "name": "Store Keeper" },
+      { "id": "inventory_assistant", "name": "Inventory Assistant" }
+    ]
+  },
+  {
+    "id": "emergency_services",
+    "name": "Emergency Services",
+    "icon": "🚨",
+    "subcategories": [
+      { "id": "emergency_electrician", "name": "Emergency Electrician" },
+      { "id": "emergency_plumber", "name": "Emergency Plumber" },
+      { "id": "locksmith", "name": "Locksmith" },
+      { "id": "glass_repair", "name": "Glass Repair" },
+      { "id": "flood_cleanup", "name": "Flood Cleanup" }
+    ]
+  },
+  {
+    "id": "general_labour",
+    "name": "General Labour",
+    "icon": "⭐",
+    "subcategories": [
+      { "id": "daily_wage_labourer", "name": "Daily Wage Labourer" },
+      { "id": "heavy_lifter", "name": "Heavy Lifter" },
+      { "id": "helper", "name": "Helper" },
+      { "id": "multi_skilled_worker", "name": "Multi-skilled Worker" },
+      { "id": "temporary_worker", "name": "Temporary Worker" }
+    ]
+  }
+]

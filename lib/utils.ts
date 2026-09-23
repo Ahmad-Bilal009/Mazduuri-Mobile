@@ -44,18 +44,18 @@ export const SKILL_LABELS: Record<Skill, string> = {
 };
 
 export const SKILL_ICONS: Record<Skill, string> = {
-  construction: "🏗️",
-  plumbing: "🔧",
-  electrical: "⚡",
-  painting: "🎨",
-  carpentry: "🪵",
-  welding: "🔩",
-  driving: "🚗",
-  cleaning: "🧹",
-  cooking: "👨‍🍳",
-  agriculture: "🌾",
-  security: "🛡️",
-  other: "💼",
+  construction: "hammer-wrench",
+  plumbing: "pipe-wrench",
+  electrical: "lightning-bolt",
+  painting: "palette",
+  carpentry: "hammer",
+  welding: "fire",
+  driving: "car",
+  cleaning: "broom",
+  cooking: "chef-hat",
+  agriculture: "sprout",
+  security: "shield",
+  other: "dots-horizontal",
 };
 
 export const ALL_SKILLS: Skill[] = [
@@ -99,4 +99,62 @@ export function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: nu
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Categories to Skills Mapping ──────────────────────────────────────────────
+
+export function mapCategoriesToSkills(categoryIds?: string[] | null): Skill[] {
+  if (!categoryIds || categoryIds.length === 0) return [];
+  const skillsSet = new Set<Skill>();
+  for (const catId of categoryIds) {
+    switch (catId) {
+      case "construction_building":
+      case "factory_industrial":
+      case "general_labour":
+        skillsSet.add("construction");
+        break;
+      case "electrical":
+      case "hvac_cooling":
+      case "electronics_repair":
+      case "installation_services":
+        skillsSet.add("electrical");
+        break;
+      case "plumbing":
+      case "emergency_services":
+        skillsSet.add("plumbing");
+        break;
+      case "painting_finishing":
+        skillsSet.add("painting");
+        break;
+      case "carpentry_wood":
+        skillsSet.add("carpentry");
+        break;
+      case "metal_welding":
+        skillsSet.add("welding");
+        break;
+      case "drivers":
+      case "delivery_services":
+        skillsSet.add("driving");
+        break;
+      case "cleaning":
+      case "domestic_workers":
+      case "transport_logistics":
+        skillsSet.add("cleaning");
+        break;
+      case "cooking":
+        skillsSet.add("cooking");
+        break;
+      case "agriculture":
+      case "animal_pet_care":
+        skillsSet.add("agriculture");
+        break;
+      case "security":
+        skillsSet.add("security");
+        break;
+      default:
+        skillsSet.add("other");
+        break;
+    }
+  }
+  return Array.from(skillsSet);
 }

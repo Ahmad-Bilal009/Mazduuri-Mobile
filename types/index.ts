@@ -2,12 +2,26 @@
 
 export type UserRole = "worker" | "client" | "admin";
 
+export type ApprovalStatus =
+  | "pending"
+  | "approved"
+  // Admin reviewed and wants something fixed — the account stays usable and
+  // the reason is in `approvalNote`.
+  | "changes_required"
+  | "rejected";
+
 export interface User {
   id: string;
-  phone: string;
+  // Null for accounts created through Google, which carry an email instead.
+  phone: string | null;
+  email?: string | null;
+  // Captured at signup, before any role profile exists.
+  name?: string | null;
   role: UserRole;
   isVerified: boolean;
   isBlocked?: boolean;
+  approvalStatus?: ApprovalStatus;
+  approvalNote?: string | null;
   createdAt: string;
 }
 
@@ -16,8 +30,6 @@ export interface AuthResponse {
   token: string;
   isNewUser?: boolean;
 }
-
-// ─── Worker Profile ──────────────────────────────────────────────────────────
 
 export type Skill =
   | "construction"
@@ -33,37 +45,52 @@ export type Skill =
   | "security"
   | "other";
 
+// ─── Worker Profile ──────────────────────────────────────────────────────────
+
 export interface WorkerProfile {
   id: string;
   userId: string;
   name: string;
+  categoryIds: string[];
+  subcategoryIds: string[];
   skills: Skill[];
   experience: number;
   dailyWage: number;
-  city: string;
+  city?: string;
+  address?: string;
   latitude?: number;
   longitude?: number;
   bio?: string;
   profilePicture?: string;
+  selfieUrl?: string;
+  nationalIdCardUrl?: string;
+  nationalIdBackUrl?: string;
   availability: boolean;
   rating: number;
   totalJobs: number;
   createdAt: string;
   updatedAt: string;
-  // Included by GET /workers/:id
-  user?: { id: string; phone: string; createdAt: string };
+  user?: { id: string; phone: string | null; createdAt: string };
 }
 
 export interface CreateWorkerProfile {
   name: string;
-  skills: Skill[];
+  /** Stored on the user account, not the profile. */
+  phone?: string;
+  categoryIds: string[];
+  subcategoryIds: string[];
+  skills?: Skill[];
   experience: number;
   dailyWage: number;
-  city: string;
+  address?: string;
+  city?: string;
   latitude?: number;
   longitude?: number;
   bio?: string;
   profilePicture?: string;
+  selfieUrl?: string;
+  nationalIdCardUrl?: string;
+  nationalIdBackUrl?: string;
   availability?: boolean;
 }
 
@@ -74,8 +101,16 @@ export interface ClientProfile {
   userId: string;
   name: string;
   companyName?: string;
-  city: string;
+  categoryIds: string[];
+  subcategoryIds: string[];
+  address?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
   profilePicture?: string;
+  selfieUrl?: string;
+  nationalIdCardUrl?: string;
+  nationalIdBackUrl?: string;
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -89,8 +124,10 @@ export interface Job {
   clientId: string;
   title: string;
   description: string;
-  skills: Skill[];
-  city: string;
+  categoryId: string;
+  subcategoryId: string;
+  city?: string;
+  address?: string;
   latitude?: number;
   longitude?: number;
   budget: number;
@@ -99,9 +136,9 @@ export interface Job {
   image?: string;
   createdAt: string;
   updatedAt: string;
-  // Included in list/detail responses
   client?: {
     id: string;
+    phone?: string;
     clientProfile?: { name: string; companyName?: string; city?: string } | null;
   };
   _count?: { applications: number };
@@ -113,20 +150,76 @@ export interface JobApplication {
   jobId: string;
   workerId: string;
   message?: string;
+  offerAmount?: number;
   status: ApplicationStatus;
   createdAt: string;
   job?: Job;
   worker?: {
     id: string;
-    workerProfile?: { name: string; rating: number; skills: Skill[] } | null;
+    workerProfile?: {
+      name: string;
+      rating: number;
+      skills: string[];
+      dailyWage: number;
+      city?: string;
+      profilePicture?: string;
+      experience: number;
+    } | null;
+  };
+}
+
+export type MessageType = "text" | "image" | "location" | "voice";
+
+export interface Message {
+  id: string;
+  conversationId?: string;
+  senderId: string;
+  type: MessageType;
+  content: string;
+  mediaUrl?: string;
+  latitude?: number;
+  longitude?: number;
+  locationLabel?: string;
+  readAt?: string | null;
+  createdAt: string;
+}
+
+export interface Conversation {
+  id: string;
+  createdAt: string;
+  lastMessageAt?: string;
+  worker: {
+    id: string;
+    phone?: string;
+    workerProfile?: { name: string; profilePicture?: string } | null;
+  };
+  client: {
+    id: string;
+    phone?: string;
+    clientProfile?: { name: string; profilePicture?: string } | null;
+  };
+  messages?: Pick<Message, "content" | "senderId" | "createdAt">[];
+}
+
+export interface Review {
+  id: string;
+  applicationId: string;
+  rating: number;
+  comment?: string;
+  createdAt: string;
+  client?: {
+    clientProfile?: { name: string; profilePicture?: string } | null;
   };
 }
 
 export interface CreateJob {
   title: string;
   description: string;
-  skills: Skill[];
-  city: string;
+  categoryId: string;
+  subcategoryId: string;
+  skills?: Skill[];
+  city?: string;
+  address?: string;
   latitude?: number;
   longitude?: number;
   budget: number;
@@ -150,14 +243,12 @@ export interface Pagination {
   totalPages: number;
 }
 
-// Shape returned by list endpoints on the new backend
 export interface ListResponse<T> {
   success: boolean;
   data: T[];
   pagination: Pagination;
 }
 
-// Convenience wrapper kept for screen compatibility
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;
@@ -169,7 +260,8 @@ export interface PaginatedResponse<T> {
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
 export interface WorkerFilters {
-  skills?: Skill[];
+  categoryIds?: string[];
+  subcategoryIds?: string[];
   city?: string;
   available?: boolean;
   minWage?: number;
@@ -179,7 +271,8 @@ export interface WorkerFilters {
 }
 
 export interface JobFilters {
-  skills?: Skill[];
+  categoryId?: string;
+  subcategoryId?: string;
   city?: string;
   status?: JobStatus;
   minBudget?: number;

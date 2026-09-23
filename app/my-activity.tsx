@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { jobsApi } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { formatCurrency, timeAgo } from "@/lib/utils";
+import { BackButton } from "@/components/BackButton";
 import type { Job, JobApplication } from "@/types";
 
 export default function MyActivityScreen() {
@@ -54,9 +55,12 @@ export default function MyActivityScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
-          <Text style={styles.heading}>
-            {isClientView ? "My Posted Jobs" : "My Applications"}
-          </Text>
+          <View>
+            <BackButton style={{ marginBottom: 8 }} />
+            <Text style={styles.heading}>
+              {isClientView ? "My Posted Jobs" : "My Applications"}
+            </Text>
+          </View>
         }
         ListEmptyComponent={
           <View style={styles.empty}>

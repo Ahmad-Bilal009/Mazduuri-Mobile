@@ -7,16 +7,23 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 
 const SKILLS = [
-  { emoji: "🏗️", label: "Construction" },
-  { emoji: "🔧", label: "Plumbing" },
-  { emoji: "⚡", label: "Electrical" },
-  { emoji: "🎨", label: "Painting" },
-  { emoji: "🪵", label: "Carpentry" },
-  { emoji: "🚗", label: "Driving" },
-  { emoji: "🧹", label: "Cleaning" },
-  { emoji: "🌾", label: "Agriculture" },
+  { icon: "hammer-wrench", label: "Construction" },
+  { icon: "pipe-wrench", label: "Plumbing" },
+  { icon: "lightning-bolt", label: "Electrical" },
+  { icon: "palette", label: "Painting" },
+  { icon: "hammer", label: "Carpentry" },
+  { icon: "car", label: "Driving" },
+  { icon: "broom", label: "Cleaning" },
+  { icon: "sprout", label: "Agriculture" },
+];
+
+const HOW_STEPS = [
+  { icon: "magnify", title: "Search Workers", desc: "Browse by skill & location" },
+  { icon: "phone", title: "Contact Directly", desc: "Login to see phone numbers" },
+  { icon: "check-circle", title: "Hire & Pay", desc: "Agree & pay directly — no fees" },
 ];
 
 export default function HomeScreen() {
@@ -46,14 +53,16 @@ export default function HomeScreen() {
             style={styles.primaryBtn}
             onPress={() => router.push("/(tabs)/workers")}
           >
-            <Text style={styles.primaryBtnText}>👷 Find Workers</Text>
+            <MaterialCommunityIcons name="account-hard-hat" size={18} color="#fff" />
+            <Text style={styles.primaryBtnText}> Find Workers</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryBtn}
             onPress={() => router.push("/(tabs)/jobs")}
           >
-            <Text style={styles.secondaryBtnText}>💼 Browse Jobs</Text>
+            <MaterialCommunityIcons name="briefcase" size={17} color="#374151" />
+            <Text style={styles.secondaryBtnText}> Browse Jobs</Text>
           </TouchableOpacity>
         </View>
 
@@ -66,7 +75,7 @@ export default function HomeScreen() {
               style={styles.skillItem}
               onPress={() => router.push(`/(tabs)/workers`)}
             >
-              <Text style={styles.skillEmoji}>{skill.emoji}</Text>
+              <MaterialCommunityIcons name={skill.icon} size={26} color="#374151" style={styles.skillIcon} />
               <Text style={styles.skillLabel}>{skill.label}</Text>
             </TouchableOpacity>
           ))}
@@ -74,26 +83,10 @@ export default function HomeScreen() {
 
         {/* How it works */}
         <Text style={styles.sectionTitle}>How It Works</Text>
-        {[
-          {
-            icon: "🔍",
-            title: "Search Workers",
-            desc: "Browse by skill & location",
-          },
-          {
-            icon: "📞",
-            title: "Contact Directly",
-            desc: "Login to see phone numbers",
-          },
-          {
-            icon: "✅",
-            title: "Hire & Pay",
-            desc: "Agree & pay directly — no fees",
-          },
-        ].map((step) => (
+        {HOW_STEPS.map((step) => (
           <View key={step.title} style={styles.stepCard}>
             <View style={styles.stepIcon}>
-              <Text style={{ fontSize: 20 }}>{step.icon}</Text>
+              <MaterialCommunityIcons name={step.icon} size={22} color="#16a34a" />
             </View>
             <View>
               <Text style={styles.stepTitle}>{step.title}</Text>
@@ -164,6 +157,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
     marginBottom: 10,
   },
   primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
@@ -172,6 +167,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
     borderWidth: 1,
     borderColor: "#e5e7eb",
   },
@@ -200,7 +197,7 @@ const styles = StyleSheet.create({
     width: "22%",
     minWidth: 70,
   },
-  skillEmoji: { fontSize: 22, marginBottom: 4 },
+  skillIcon: { marginBottom: 6 },
   skillLabel: {
     fontSize: 10,
     color: "#4b5563",
