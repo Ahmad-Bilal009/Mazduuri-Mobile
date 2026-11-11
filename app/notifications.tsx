@@ -1,242 +1,342 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  Switch,
-  ActivityIndicator,
+  FlatList,
   TouchableOpacity,
-  Linking,
-  Platform,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
-import * as Notifications from "expo-notifications";
+import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { notificationsApi, type NotificationPreferences } from "@/lib/api";
-import { registerForPushNotifications } from "@/lib/push";
+import { notificationsApi, type InboxFilter, type InboxNotification } from "@/lib/api";
+import { routeForNotification } from "@/lib/push";
+import { useAuthStore } from "@/store/authStore";
 import { BackButton } from "@/components/BackButton";
 
-type PrefKey = keyof NotificationPreferences;
-
-const ROWS: { key: PrefKey; icon: string; label: string; description: string }[] = [
-  {
-    key: "pushChat",
-    icon: "chat-outline",
-    label: "Messages",
-    description: "When someone sends you a message",
-  },
-  {
-    key: "pushApplications",
-    icon: "briefcase-outline",
-    label: "Job activity",
-    description: "Applications on your jobs, and decisions on yours",
-  },
-  {
-    key: "pushReview",
-    icon: "shield-check-outline",
-    label: "Profile review",
-    description: "When your profile is approved or needs changes",
-  },
-  {
-    key: "pushNewJobs",
-    icon: "bell-ring-outline",
-    label: "New jobs",
-    description: "Jobs matching your skills in your city",
-  },
+const TABS: { key: InboxFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "jobs", label: "Jobs" },
+  { key: "messages", label: "Messages" },
 ];
 
-export default function NotificationSettingsScreen() {
-  const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
-  const [serverEnabled, setServerEnabled] = useState(true);
-  const [osGranted, setOsGranted] = useState(true);
+const CATEGORY_STYLE: Record<
+  InboxNotification["category"],
+  { icon: string; bg: string }
+> = {
+  applications: { icon: "check-bold", bg: "#22c55e" },
+  chat: { icon: "chat-processing", bg: "#3b82f6" },
+  review: { icon: "shield-check", bg: "#f59e0b" },
+  newJobs: { icon: "briefcase-plus", bg: "#3b82f6" },
+};
+
+function timeAgo(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return "now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+export default function NotificationsScreen() {
+  const router = useRouter();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  const [tab, setTab] = useState<InboxFilter>("all");
+  const [items, setItems] = useState<InboxNotification[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [data, perms] = await Promise.all([
-        notificationsApi.getPreferences(),
-        Notifications.getPermissionsAsync(),
-      ]);
-      const { pushEnabled, ...rest } = data;
-      setPrefs(rest);
-      setServerEnabled(pushEnabled);
-      setOsGranted(perms.granted);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not load settings");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (which: InboxFilter, silent = false) => {
+      if (!isAuthenticated) {
+        setLoading(false);
+        return;
+      }
+      if (!silent) setLoading(true);
+      setError("");
+      try {
+        const page = await notificationsApi.list({ type: which });
+        setItems(page.items);
+        setCursor(page.nextCursor);
+        setUnread(page.unreadCount);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Could not load notifications");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [isAuthenticated],
+  );
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load(tab, items.length > 0);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [load, tab]),
+  );
 
-  async function toggle(key: PrefKey, value: boolean) {
-    if (!prefs) return;
-    const previous = prefs;
-    // Optimistic: a switch that lags behind the finger feels broken.
-    setPrefs({ ...prefs, [key]: value });
+  async function loadMore() {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
     try {
-      await notificationsApi.updatePreferences({ [key]: value });
+      const page = await notificationsApi.list({ type: tab, cursor });
+      setItems((prev) => [...prev, ...page.items]);
+      setCursor(page.nextCursor);
     } catch {
-      setPrefs(previous);
+      // keep what we have; the user can pull to refresh
+    } finally {
+      setLoadingMore(false);
     }
   }
 
-  async function handleEnablePermission() {
-    const outcome = await registerForPushNotifications();
-    if (outcome === "granted") {
-      setOsGranted(true);
-    } else {
-      // Android 13+ ignores a repeat request once denied, so the only route
-      // left is system settings.
-      Linking.openSettings().catch(() => {});
+  async function markAllRead() {
+    if (unread === 0) return;
+    const now = new Date().toISOString();
+    setItems((prev) => prev.map((n) => (n.readAt ? n : { ...n, readAt: now })));
+    setUnread(0);
+    notificationsApi.markAllRead().catch(() => load(tab, true));
+  }
+
+  function open(n: InboxNotification) {
+    if (!n.readAt) {
+      setItems((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x)),
+      );
+      setUnread((u) => Math.max(0, u - 1));
+      notificationsApi.markRead(n.id).catch(() => {});
     }
+    const route = routeForNotification(n.data ?? undefined);
+    if (route) router.push(route.pathname as never);
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <BackButton />
-        <Text style={styles.headerTitle}>Notifications</Text>
-        <View style={{ width: 36 }} />
+        <View style={styles.titleRow}>
+          <BackButton />
+          <Text style={styles.title}>Notifications</Text>
+        </View>
+        {isAuthenticated && (
+          <TouchableOpacity onPress={markAllRead} disabled={unread === 0} hitSlop={8}>
+            <Text style={[styles.markAll, unread === 0 && { opacity: 0.4 }]}>Mark all read</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {loading ? (
+      <View style={styles.tabs}>
+        {TABS.map((t) => {
+          const active = tab === t.key;
+          return (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.tab, active && styles.tabActive]}
+              onPress={() => {
+                if (t.key === tab) return;
+                setItems([]);
+                setTab(t.key);
+              }}
+            >
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {!isAuthenticated ? (
+        <Empty
+          icon="bell-outline"
+          title="Log in to see notifications"
+          desc="Job updates and messages will show up here."
+          action={{ label: "Log in", onPress: () => router.push("/auth") }}
+        />
+      ) : loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#16a34a" />
         </View>
       ) : error ? (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={load}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
+        <Empty
+          icon="wifi-off"
+          title="Couldn't load notifications"
+          desc={error}
+          action={{ label: "Retry", onPress: () => load(tab) }}
+        />
       ) : (
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-          {Platform.OS !== "android" && (
-            <View style={styles.notice}>
-              <MaterialCommunityIcons name="information-outline" size={18} color="#92400e" />
-              <Text style={styles.noticeText}>
-                Push notifications are currently available on Android only.
-              </Text>
-            </View>
-          )}
-
-          {!osGranted && Platform.OS === "android" && (
-            <TouchableOpacity style={styles.notice} onPress={handleEnablePermission}>
-              <MaterialCommunityIcons name="bell-off-outline" size={18} color="#92400e" />
-              <Text style={styles.noticeText}>
-                Notifications are turned off for Mazduuri. Tap to enable them.
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {!serverEnabled && (
-            <View style={styles.notice}>
-              <MaterialCommunityIcons name="alert-outline" size={18} color="#92400e" />
-              <Text style={styles.noticeText}>
-                Push delivery isn&apos;t configured on the server yet. Your choices are
-                saved and will apply once it is.
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.card}>
-            {ROWS.map((row, i) => (
-              <View
-                key={row.key}
-                style={[styles.row, i === ROWS.length - 1 && { borderBottomWidth: 0 }]}
+        <FlatList
+          data={items}
+          keyExtractor={(n) => n.id}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                load(tab, true);
+              }}
+              tintColor="#16a34a"
+            />
+          }
+          renderItem={({ item }) => {
+            const style = CATEGORY_STYLE[item.category] ?? CATEGORY_STYLE.newJobs;
+            const isUnread = !item.readAt;
+            return (
+              <TouchableOpacity
+                style={[styles.row, isUnread && styles.rowUnread]}
+                onPress={() => open(item)}
+                activeOpacity={0.7}
               >
-                <MaterialCommunityIcons name={row.icon} size={22} color="#4b5563" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowLabel}>{row.label}</Text>
-                  <Text style={styles.rowDesc}>{row.description}</Text>
+                <View style={[styles.icon, { backgroundColor: style.bg }]}>
+                  <MaterialCommunityIcons name={style.icon} size={22} color="#fff" />
                 </View>
-                <Switch
-                  value={prefs?.[row.key] ?? true}
-                  onValueChange={(v) => toggle(row.key, v)}
-                  trackColor={{ false: "#e5e7eb", true: "#bbf7d0" }}
-                  thumbColor={prefs?.[row.key] ? "#16a34a" : "#f3f4f6"}
-                />
-              </View>
-            ))}
-          </View>
-
-          <Text style={styles.footnote}>
-            Turning a category off stops those notifications for every device signed
-            in to your account.
-          </Text>
-        </ScrollView>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.rowBody} numberOfLines={2}>
+                    {item.body}
+                  </Text>
+                </View>
+                <View style={styles.meta}>
+                  <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
+                  {isUnread && <View style={styles.dot} />}
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+          ListEmptyComponent={
+            <Empty
+              icon="bell-check-outline"
+              title="You're all caught up"
+              desc={
+                tab === "messages"
+                  ? "New messages will appear here."
+                  : tab === "jobs"
+                    ? "Job applications and updates will appear here."
+                    : "Job updates and messages will appear here."
+              }
+            />
+          }
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator color="#16a34a" style={{ marginVertical: 16 }} /> : null
+          }
+          contentContainerStyle={{ paddingBottom: 32, flexGrow: 1 }}
+          showsVerticalScrollIndicator={false}
+        />
       )}
     </SafeAreaView>
   );
 }
 
+function Empty({
+  icon,
+  title,
+  desc,
+  action,
+}: {
+  icon: string;
+  title: string;
+  desc: string;
+  action?: { label: string; onPress: () => void };
+}) {
+  return (
+    <View style={styles.empty}>
+      <View style={styles.emptyIcon}>
+        <MaterialCommunityIcons name={icon} size={34} color="#16a34a" />
+      </View>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyDesc}>{desc}</Text>
+      {action && (
+        <TouchableOpacity style={styles.emptyBtn} onPress={action.onPress}>
+          <Text style={styles.emptyBtnText}>{action.label}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f9fafb" },
+  safe: { flex: 1, backgroundColor: "#fff" },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    paddingTop: 8,
+    paddingBottom: 14,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: "#111827" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  body: { padding: 16, paddingBottom: 32 },
-  notice: {
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  title: { fontSize: 24, fontWeight: "800", color: "#0f172a" },
+  markAll: { fontSize: 14, fontWeight: "700", color: "#16a34a" },
+
+  tabs: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#fffbeb",
-    borderWidth: 1,
-    borderColor: "#fde68a",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 14,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 4,
+    borderRadius: 999,
+    backgroundColor: "#f1f5f9",
   },
-  noticeText: { flex: 1, fontSize: 12.5, color: "#92400e", lineHeight: 18 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-    paddingHorizontal: 14,
-  },
+  tab: { flex: 1, height: 38, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  tabActive: { backgroundColor: "#16a34a" },
+  tabText: { fontSize: 14, fontWeight: "600", color: "#0f172a" },
+  tabTextActive: { color: "#fff" },
+
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 14,
+    gap: 14,
+    paddingVertical: 16,
+    paddingLeft: 16,
+    paddingRight: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: "#f1f5f9",
+    borderLeftWidth: 4,
+    borderLeftColor: "transparent",
   },
-  rowLabel: { fontSize: 15, fontWeight: "600", color: "#111827" },
-  rowDesc: { fontSize: 12, color: "#6b7280", marginTop: 2, lineHeight: 16 },
-  footnote: {
-    fontSize: 12,
-    color: "#9ca3af",
-    lineHeight: 17,
-    marginTop: 14,
-    paddingHorizontal: 4,
+  rowUnread: { borderLeftColor: "#16a34a" },
+  icon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  errorText: { color: "#ef4444", fontSize: 14, textAlign: "center" },
-  retryBtn: {
-    marginTop: 14,
+  rowTitle: { fontSize: 15, fontWeight: "700", color: "#0f172a" },
+  rowBody: { fontSize: 13.5, color: "#475569", marginTop: 3, lineHeight: 19 },
+  meta: { alignItems: "flex-end", alignSelf: "stretch", justifyContent: "space-between", paddingVertical: 2 },
+  time: { fontSize: 12.5, color: "#64748b" },
+  dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "#16a34a" },
+
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingVertical: 60 },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#dcfce7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#0f172a", marginTop: 14 },
+  emptyDesc: { fontSize: 13.5, color: "#64748b", textAlign: "center", lineHeight: 20, marginTop: 6 },
+  emptyBtn: {
+    marginTop: 18,
     backgroundColor: "#16a34a",
-    borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
   },
-  retryText: { color: "#fff", fontWeight: "600" },
+  emptyBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
 });

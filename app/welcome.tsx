@@ -102,7 +102,7 @@ export default function WelcomeScreen() {
 
         <TouchableOpacity
           style={styles.createBtn}
-          onPress={() => router.push("/auth")}
+          onPress={() => router.push("/auth?mode=signup")}
           activeOpacity={0.85}
         >
           <MaterialCommunityIcons name="account-plus" size={21} color="#16a34a" />

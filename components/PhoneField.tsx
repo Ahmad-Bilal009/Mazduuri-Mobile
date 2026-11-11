@@ -1,4 +1,4 @@
-import { View, Text, TextInput, StyleSheet } from "react-native";
+import { View, Text, TextInput, StyleSheet, type StyleProp, type TextStyle } from "react-native";
 
 /**
  * Pakistani mobile number input used during profile completion.
@@ -18,6 +18,8 @@ interface Props {
   onChange: (digits: string) => void;
   label?: string;
   hint?: string;
+  /** Lets a form match its own label style. */
+  labelStyle?: StyleProp<TextStyle>;
 }
 
 export function PhoneField({
@@ -25,10 +27,11 @@ export function PhoneField({
   onChange,
   label = "Phone Number *",
   hint = "Clients call this number to reach you. We'll verify it during review.",
+  labelStyle,
 }: Props) {
   return (
     <>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, labelStyle]}>{label}</Text>
       <View style={styles.row}>
         <View style={styles.countryBox}>
           <Text style={styles.flag}>🇵🇰</Text>

@@ -169,22 +169,54 @@ export const authApi = {
       auth: false,
     }),
 
+  /** Creates an unverified account and emails a 6-digit code. No session yet. */
   register: (payload: {
     email: string;
+    phone: string;
     password: string;
     name: string;
     role: "worker" | "client";
   }) =>
-    request<AuthResponse>("/auth/register", {
+    request<{ requiresVerification: true; destination: string }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(payload),
       auth: false,
     }),
 
-  login: (email: string, password: string) =>
+  /** `identifier` is a mobile number or an email. */
+  login: (identifier: string, password: string) =>
     request<AuthResponse>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
+      auth: false,
+    }),
+
+  verifyEmail: (identifier: string, code: string) =>
+    request<AuthResponse>("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ identifier, code }),
+      auth: false,
+    }),
+
+  resendEmailCode: (identifier: string, purpose: "verify_email" | "reset_password") =>
+    request<{ sent: boolean }>("/auth/resend-email-code", {
+      method: "POST",
+      body: JSON.stringify({ identifier, purpose }),
+      auth: false,
+    }),
+
+  forgotPassword: (identifier: string) =>
+    request<{ sent: boolean }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ identifier }),
+      auth: false,
+    }),
+
+  /** Sets a new password and signs the user in. */
+  resetPassword: (identifier: string, code: string, password: string) =>
+    request<AuthResponse>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ identifier, code, password }),
       auth: false,
     }),
 
@@ -385,6 +417,9 @@ export const profileApi = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  /** Permanently deletes the account and everything tied to it. */
+  deleteAccount: () => request<null>("/profile", { method: "DELETE" }),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -419,7 +454,39 @@ export const notificationsApi = {
       method: "PATCH",
       body: JSON.stringify(prefs),
     }),
+
+  list: (params: { type?: InboxFilter; cursor?: string | null } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.type && params.type !== "all") qs.set("type", params.type);
+    if (params.cursor) qs.set("cursor", params.cursor);
+    const q = qs.toString();
+    return request<InboxPage>(`/notifications${q ? `?${q}` : ""}`);
+  },
+
+  markRead: (id: string) =>
+    request<null>(`/notifications/${id}/read`, { method: "POST" }),
+
+  markAllRead: () =>
+    request<{ updated: number }>("/notifications/read-all", { method: "POST" }),
 };
+
+export type InboxFilter = "all" | "jobs" | "messages";
+
+export interface InboxNotification {
+  id: string;
+  category: "chat" | "applications" | "review" | "newJobs";
+  title: string;
+  body: string;
+  data: Record<string, string> | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface InboxPage {
+  items: InboxNotification[];
+  unreadCount: number;
+  nextCursor: string | null;
+}
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
 

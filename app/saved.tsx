@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   RefreshControl,
+  Image,
+  Alert,
 } from "react-native";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -14,8 +16,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { workersApi } from "@/lib/api";
 import { useSavedStore } from "@/store/savedStore";
 import { useAuthStore } from "@/store/authStore";
-import { WorkerDetailCard } from "@/components/WorkerDetailCard";
 import { BackButton } from "@/components/BackButton";
+import { getCategory } from "@/lib/categories";
 import type { WorkerProfile } from "@/types";
 
 export default function SavedWorkersScreen() {
@@ -91,11 +93,10 @@ export default function SavedWorkersScreen() {
               tintColor="#16a34a"
             />
           }
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
           renderItem={({ item }) => (
-            <WorkerDetailCard
-              worker={item}
-              onPress={() => router.push(`/workers/${item.id}`)}
-            />
+            <SavedTile worker={item} onPress={() => router.push(`/workers/${item.id}`)} />
           )}
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -127,8 +128,56 @@ export default function SavedWorkersScreen() {
   );
 }
 
+function SavedTile({ worker, onPress }: { worker: WorkerProfile; onPress: () => void }) {
+  const toggleSaved = useSavedStore((s) => s.toggle);
+  const trade = worker.categoryIds?.[0] ? getCategory(worker.categoryIds[0])?.name : undefined;
+  const hasRating = (worker.rating ?? 0) > 0;
+
+  return (
+    <TouchableOpacity style={styles.tile} onPress={onPress} activeOpacity={0.9}>
+      <View style={[styles.photo, { backgroundColor: tileColor(worker.name) }]}>
+        {worker.profilePicture ? (
+          <Image source={{ uri: worker.profilePicture }} style={styles.photoImg} />
+        ) : (
+          <Text style={styles.photoInitial}>{worker.name[0]?.toUpperCase()}</Text>
+        )}
+        <TouchableOpacity
+          style={styles.heart}
+          hitSlop={8}
+          onPress={() =>
+            toggleSaved(worker.id).catch(() =>
+              Alert.alert("Error", "Could not update your saved workers."),
+            )
+          }
+        >
+          <MaterialCommunityIcons name="heart" size={18} color="#ef4444" />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.tileBody}>
+        <Text style={styles.tileName} numberOfLines={1}>
+          {worker.name}
+        </Text>
+        {trade ? (
+          <Text style={styles.tileTrade} numberOfLines={1}>
+            {trade}
+          </Text>
+        ) : null}
+        <View style={styles.tileRating}>
+          <MaterialCommunityIcons name="star" size={15} color="#facc15" />
+          <Text style={styles.tileRatingText}>{hasRating ? worker.rating.toFixed(1) : "New"}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function tileColor(name: string): string {
+  const colors = ["#16a34a", "#2563eb", "#9333ea", "#ea580c", "#0d9488"];
+  return colors[name.charCodeAt(0) % colors.length];
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f9fafb" },
+  safe: { flex: 1, backgroundColor: "#fff" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -136,10 +185,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: "#111827" },
+  headerTitle: { fontSize: 19, fontWeight: "800", color: "#0f172a" },
+  gridRow: { gap: 12 },
+  tile: {
+    flex: 1,
+    maxWidth: "50%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    overflow: "hidden",
+    marginBottom: 12,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  photo: {
+    height: 150,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoImg: { width: "100%", height: "100%" },
+  photoInitial: { color: "#fff", fontSize: 44, fontWeight: "800" },
+  heart: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  tileBody: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12 },
+  tileName: { fontSize: 15.5, fontWeight: "700", color: "#0f172a" },
+  tileTrade: { fontSize: 13, color: "#64748b", marginTop: 2 },
+  tileRating: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },
+  tileRatingText: { fontSize: 13.5, fontWeight: "700", color: "#0f172a" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   list: { padding: 16, paddingBottom: 32 },
   empty: { alignItems: "center", paddingTop: 80, paddingHorizontal: 32 },
