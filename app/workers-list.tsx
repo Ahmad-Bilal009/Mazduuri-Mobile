@@ -10,7 +10,7 @@ import {
   Modal,
   ScrollView,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { workersApi } from "@/lib/api";
 import { getAllCategories } from "@/lib/categories";
@@ -29,13 +29,19 @@ const EMPTY_FILTERS: AppliedFilters = { categoryIds: [], subcategoryIds: [] };
 
 export default function WorkersListScreen() {
   const router = useRouter();
+  // Home's search card opens this screen pre-filtered.
+  const params = useLocalSearchParams<{ city?: string; categoryId?: string; subcategoryId?: string }>();
+  const initialFilters: AppliedFilters = {
+    categoryIds: params.categoryId ? [params.categoryId] : [],
+    subcategoryIds: params.subcategoryId ? [params.subcategoryId] : [],
+  };
   const [workers, setWorkers] = useState<WorkerProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(params.city ?? "");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
-  const [appliedFilters, setAppliedFilters] = useState<AppliedFilters>(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<AppliedFilters>(initialFilters);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [draftCategoryIds, setDraftCategoryIds] = useState<string[]>([]);
   const [draftSubcategoryIds, setDraftSubcategoryIds] = useState<string[]>([]);

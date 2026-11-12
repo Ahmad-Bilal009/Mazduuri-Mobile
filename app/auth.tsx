@@ -51,7 +51,7 @@ const BORDER = "#e2e8f0";
 
 export default function AuthScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; role?: string }>();
   const { setUser } = useAuthStore();
 
   const [step, setStep] = useState<Step>(params.mode === "signup" ? "signup" : "signin");
@@ -60,7 +60,7 @@ export default function AuthScreen() {
   const [identifier, setIdentifier] = useState(""); // sign in / forgot: mobile or email
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [role, setRole] = useState<Role>("client");
+  const [role, setRole] = useState<Role>(params.role === "worker" ? "worker" : "client");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");

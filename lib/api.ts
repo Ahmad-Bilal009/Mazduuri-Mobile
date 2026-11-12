@@ -31,6 +31,34 @@ function getBaseUrl(): string {
 
 export const BASE_URL = getBaseUrl();
 
+const REQUEST_TIMEOUT_MS = 20_000;
+/** Photos and voice notes on a slow mobile connection need far longer. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+/**
+ * fetch with a timeout. React Native's fetch never gives up on an address that
+ * doesn't answer (wrong LAN IP, server down), which leaves buttons spinning
+ * forever; this turns that into a readable error.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error("Can't reach the server. Check your internet connection and try again.");
+    }
+    throw new Error("Network error. Check your internet connection and try again.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 /** Carries the backend's machine-readable `code` alongside the message. */
@@ -69,7 +97,7 @@ async function request<T>(
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetchWithTimeout(`${BASE_URL}${path}`, {
     ...options,
     headers,
   });
@@ -109,7 +137,7 @@ async function listRequest<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const res = await fetchWithTimeout(`${BASE_URL}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     handleUnauthorized();
@@ -500,11 +528,11 @@ export async function uploadAudio(uri: string): Promise<string> {
     name: "voice.m4a",
   } as unknown as Blob);
 
-  const res = await fetch(`${BASE_URL}/upload/audio`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/upload/audio`, {
     method: "POST",
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: formData,
-  });
+  }, UPLOAD_TIMEOUT_MS);
 
   if (res.status === 401) {
     handleUnauthorized();
@@ -532,13 +560,13 @@ export async function uploadImage(
   } as unknown as Blob);
   formData.append("folder", folder);
 
-  const res = await fetch(`${BASE_URL}/upload`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/upload`, {
     method: "POST",
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: formData,
-  });
+  }, UPLOAD_TIMEOUT_MS);
 
   if (res.status === 401) {
     handleUnauthorized();
