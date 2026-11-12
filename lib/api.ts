@@ -335,11 +335,13 @@ export const jobsApi = {
     const params = new URLSearchParams();
     if (filters?.categoryId) params.set("categoryId", filters.categoryId);
     if (filters?.subcategoryId) params.set("subcategoryId", filters.subcategoryId);
+    if (filters?.skills?.length) params.set("skills", filters.skills.join(","));
     if (filters?.city) params.set("city", filters.city);
     if (filters?.status) params.set("status", filters.status);
     if (filters?.minBudget) params.set("minBudget", String(filters.minBudget));
     if (filters?.maxBudget) params.set("maxBudget", String(filters.maxBudget));
     if (filters?.page) params.set("page", String(filters.page));
+    if (filters?.limit) params.set("limit", String(filters.limit));
     const qs = params.toString();
     return listRequest<Job>(`/jobs${qs ? `?${qs}` : ""}`);
   },

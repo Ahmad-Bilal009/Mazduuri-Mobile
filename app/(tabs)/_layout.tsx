@@ -29,7 +29,14 @@ export default function TabsLayout() {
   const { t } = useAppTranslation();
 
   return (
-    <Tabs screenOptions={{ headerShown: false }}>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: "#16a34a",
+        tabBarInactiveTintColor: "#94a3b8",
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{

@@ -13,6 +13,7 @@ import {
   Modal,
   Switch,
   Pressable,
+  useWindowDimensions,
 } from "react-native";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { useRouter } from "expo-router";
@@ -21,7 +22,7 @@ import MapView, { Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps
 import * as Location from "expo-location";
 import { workersApi } from "@/lib/api";
 import { getAllCategories } from "@/lib/categories";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, mapHeightFor } from "@/lib/utils";
 import { WorkerDetailCard } from "@/components/WorkerDetailCard";
 import { MapLocationPicker } from "@/components/MapLocationPicker";
 import type { WorkerProfile } from "@/types";
@@ -69,6 +70,7 @@ function markerColor(name: string): string {
 export default function WorkersScreen() {
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
+  const { height: windowHeight } = useWindowDimensions();
 
   const [workers, setWorkers] = useState<WorkerWithDistance[]>([]);
   const [total, setTotal] = useState(0);
@@ -239,7 +241,7 @@ export default function WorkersScreen() {
       </ScrollView>
 
       {/* ── Map card (stays fixed while the list scrolls) ──── */}
-      <View style={styles.mapCard}>
+      <View style={[styles.mapCard, { height: mapHeightFor(windowHeight) }]}>
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
@@ -586,7 +588,6 @@ const styles = StyleSheet.create({
   chipTextActive: { color: "#15803d" },
 
   mapCard: {
-    height: 260,
     marginHorizontal: 16,
     borderRadius: 24,
     overflow: "hidden",

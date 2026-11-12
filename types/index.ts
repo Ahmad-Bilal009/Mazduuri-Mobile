@@ -126,6 +126,8 @@ export interface Job {
   description: string;
   categoryId: string;
   subcategoryId: string;
+  /** What the backend actually stores; categoryId may be absent on list rows. */
+  skills?: Skill[];
   city?: string;
   address?: string;
   latitude?: number;
@@ -272,6 +274,7 @@ export interface WorkerFilters {
 
 export interface JobFilters {
   categoryId?: string;
+  skills?: Skill[];
   subcategoryId?: string;
   city?: string;
   status?: JobStatus;
