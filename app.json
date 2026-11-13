@@ -7,9 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "mazduuri",
     "userInterfaceStyle": "light",
-    "splash": {
-      "backgroundColor": "#16a34a"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.mazduuri.app"
@@ -49,6 +46,15 @@
           "icon": "./assets/icon.png",
           "color": "#16a34a",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/logo-wordmark.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
         }
       ]
     ],

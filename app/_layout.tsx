@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { View, ActivityIndicator } from "react-native";
+import { View } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { I18nextProvider } from "react-i18next";
@@ -15,6 +16,7 @@ import {
   routeForNotification,
 } from "@/lib/push";
 import { ONBOARDED_KEY } from "@/lib/onboarding";
+import { AppSplash } from "@/components/AppSplash";
 import { initI18n } from "@/i18n";
 import i18n from "@/i18n";
 
@@ -25,8 +27,12 @@ import "@/i18n/types";
 // rather than inside an effect.
 configureForegroundHandler();
 
+// Keep the native launch screen up until <AppSplash> has drawn over it.
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
   const needsOnboarding = useRef(false);
   const router = useRouter();
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
@@ -64,12 +70,16 @@ export default function RootLayout() {
       });
   }, []);
 
-  // First launch → splash + onboarding flow
+  // Where to land once booted (this happens under the splash, so the first
+  // screen the user sees is already the right one):
+  //   signed in            → tabs (the default route)
+  //   signed out, new user → onboarding → login
+  //   signed out           → login
   useEffect(() => {
-    if (ready && fontsLoaded && needsOnboarding.current) {
-      needsOnboarding.current = false;
-      router.replace("/splash");
-    }
+    if (!ready || !fontsLoaded) return;
+    if (useAuthStore.getState().isAuthenticated) return;
+    router.replace(needsOnboarding.current ? "/onboarding" : "/auth");
+    needsOnboarding.current = false;
   }, [ready, fontsLoaded]);
 
   // Register for push once signed in, and drop the token on sign-out. The
@@ -91,8 +101,8 @@ export default function RootLayout() {
         | undefined;
       const route = routeForNotification(data);
       if (!route) return;
-      // Onboarding takes priority on a first launch; park the route instead.
-      if (!ready || !fontsLoaded || needsOnboarding.current) {
+      // Park the route until the app has booted; signed-out users land on login.
+      if (!ready || !fontsLoaded || !useAuthStore.getState().isAuthenticated) {
         pendingRoute.current = route.pathname;
         return;
       }
@@ -114,40 +124,29 @@ export default function RootLayout() {
 
   // Flush a tap that landed before the router was usable.
   useEffect(() => {
-    if (!ready || !fontsLoaded || needsOnboarding.current) return;
+    if (!ready || !fontsLoaded || !useAuthStore.getState().isAuthenticated) return;
     const target = pendingRoute.current;
     if (!target) return;
     pendingRoute.current = null;
     router.push(target as never);
   }, [ready, fontsLoaded]);
 
-  if (!ready || !fontsLoaded) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#f9fafb",
-        }}
-      >
-        <ActivityIndicator color="#16a34a" size="large" />
-      </View>
-    );
-  }
+  const booted = ready && fontsLoaded;
 
+  // One tree throughout, so the splash keeps animating while the app mounts
+  // underneath it instead of restarting.
   return (
+    <View style={{ flex: 1, backgroundColor: "#fff" }}>
+      {booted && (
     <I18nextProvider i18n={i18n}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="splash" options={{ animation: "none", gestureEnabled: false }} />
         <Stack.Screen name="onboarding" options={{ animation: "fade", gestureEnabled: false }} />
         <Stack.Screen name="welcome" options={{ animation: "fade", gestureEnabled: false }} />
-        <Stack.Screen
-          name="auth"
-          options={{ title: "Sign In", presentation: "modal" }}
-        />
+        {/* A full screen, not a modal: after the splash it is the first
+            screen, and a modal with nothing beneath it renders on black. */}
+        <Stack.Screen name="auth" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen
           name="language-select"
           options={{
@@ -160,5 +159,8 @@ export default function RootLayout() {
         <Stack.Screen name="jobs/[id]" options={{ title: "Job Details" }} />
       </Stack>
     </I18nextProvider>
+      )}
+      {!splashDone && <AppSplash ready={booted} onDone={() => setSplashDone(true)} />}
+    </View>
   );
 }
