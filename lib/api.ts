@@ -31,6 +31,34 @@ function getBaseUrl(): string {
 
 export const BASE_URL = getBaseUrl();
 
+const REQUEST_TIMEOUT_MS = 20_000;
+/** Photos and voice notes on a slow mobile connection need far longer. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+/**
+ * fetch with a timeout. React Native's fetch never gives up on an address that
+ * doesn't answer (wrong LAN IP, server down), which leaves buttons spinning
+ * forever; this turns that into a readable error.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error("Can't reach the server. Check your internet connection and try again.");
+    }
+    throw new Error("Network error. Check your internet connection and try again.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 /** Carries the backend's machine-readable `code` alongside the message. */
@@ -69,7 +97,7 @@ async function request<T>(
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetchWithTimeout(`${BASE_URL}${path}`, {
     ...options,
     headers,
   });
@@ -109,7 +137,7 @@ async function listRequest<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const res = await fetchWithTimeout(`${BASE_URL}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     handleUnauthorized();
@@ -169,22 +197,54 @@ export const authApi = {
       auth: false,
     }),
 
+  /** Creates an unverified account and emails a 6-digit code. No session yet. */
   register: (payload: {
     email: string;
+    phone: string;
     password: string;
     name: string;
     role: "worker" | "client";
   }) =>
-    request<AuthResponse>("/auth/register", {
+    request<{ requiresVerification: true; destination: string }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(payload),
       auth: false,
     }),
 
-  login: (email: string, password: string) =>
+  /** `identifier` is a mobile number or an email. */
+  login: (identifier: string, password: string) =>
     request<AuthResponse>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
+      auth: false,
+    }),
+
+  verifyEmail: (identifier: string, code: string) =>
+    request<AuthResponse>("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ identifier, code }),
+      auth: false,
+    }),
+
+  resendEmailCode: (identifier: string, purpose: "verify_email" | "reset_password") =>
+    request<{ sent: boolean }>("/auth/resend-email-code", {
+      method: "POST",
+      body: JSON.stringify({ identifier, purpose }),
+      auth: false,
+    }),
+
+  forgotPassword: (identifier: string) =>
+    request<{ sent: boolean }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ identifier }),
+      auth: false,
+    }),
+
+  /** Sets a new password and signs the user in. */
+  resetPassword: (identifier: string, code: string, password: string) =>
+    request<AuthResponse>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ identifier, code, password }),
       auth: false,
     }),
 
@@ -275,11 +335,13 @@ export const jobsApi = {
     const params = new URLSearchParams();
     if (filters?.categoryId) params.set("categoryId", filters.categoryId);
     if (filters?.subcategoryId) params.set("subcategoryId", filters.subcategoryId);
+    if (filters?.skills?.length) params.set("skills", filters.skills.join(","));
     if (filters?.city) params.set("city", filters.city);
     if (filters?.status) params.set("status", filters.status);
     if (filters?.minBudget) params.set("minBudget", String(filters.minBudget));
     if (filters?.maxBudget) params.set("maxBudget", String(filters.maxBudget));
     if (filters?.page) params.set("page", String(filters.page));
+    if (filters?.limit) params.set("limit", String(filters.limit));
     const qs = params.toString();
     return listRequest<Job>(`/jobs${qs ? `?${qs}` : ""}`);
   },
@@ -385,6 +447,9 @@ export const profileApi = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  /** Permanently deletes the account and everything tied to it. */
+  deleteAccount: () => request<null>("/profile", { method: "DELETE" }),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -419,7 +484,39 @@ export const notificationsApi = {
       method: "PATCH",
       body: JSON.stringify(prefs),
     }),
+
+  list: (params: { type?: InboxFilter; cursor?: string | null } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.type && params.type !== "all") qs.set("type", params.type);
+    if (params.cursor) qs.set("cursor", params.cursor);
+    const q = qs.toString();
+    return request<InboxPage>(`/notifications${q ? `?${q}` : ""}`);
+  },
+
+  markRead: (id: string) =>
+    request<null>(`/notifications/${id}/read`, { method: "POST" }),
+
+  markAllRead: () =>
+    request<{ updated: number }>("/notifications/read-all", { method: "POST" }),
 };
+
+export type InboxFilter = "all" | "jobs" | "messages";
+
+export interface InboxNotification {
+  id: string;
+  category: "chat" | "applications" | "review" | "newJobs";
+  title: string;
+  body: string;
+  data: Record<string, string> | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface InboxPage {
+  items: InboxNotification[];
+  unreadCount: number;
+  nextCursor: string | null;
+}
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
 
@@ -433,11 +530,11 @@ export async function uploadAudio(uri: string): Promise<string> {
     name: "voice.m4a",
   } as unknown as Blob);
 
-  const res = await fetch(`${BASE_URL}/upload/audio`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/upload/audio`, {
     method: "POST",
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: formData,
-  });
+  }, UPLOAD_TIMEOUT_MS);
 
   if (res.status === 401) {
     handleUnauthorized();
@@ -465,13 +562,13 @@ export async function uploadImage(
   } as unknown as Blob);
   formData.append("folder", folder);
 
-  const res = await fetch(`${BASE_URL}/upload`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/upload`, {
     method: "POST",
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: formData,
-  });
+  }, UPLOAD_TIMEOUT_MS);
 
   if (res.status === 401) {
     handleUnauthorized();

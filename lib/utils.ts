@@ -103,6 +103,39 @@ export function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: nu
 
 // ─── Categories to Skills Mapping ──────────────────────────────────────────────
 
+/** Map card height on the Workers and Jobs tabs: ~40% of the screen, within bounds. */
+export function mapHeightFor(windowHeight: number) {
+  return Math.round(Math.min(Math.max(windowHeight * 0.4, 300), 420));
+}
+
+/** The category each backend skill most likely came from. */
+const SKILL_TO_CATEGORY: Partial<Record<Skill, string>> = {
+  construction: "construction_building",
+  electrical: "electrical",
+  plumbing: "plumbing",
+  painting: "painting_finishing",
+  carpentry: "carpentry_wood",
+  welding: "metal_welding",
+  driving: "drivers",
+  cleaning: "cleaning",
+  cooking: "cooking",
+  agriculture: "agriculture",
+  security: "security",
+};
+
+/**
+ * A job's category. The backend stores coarse `skills` rather than the
+ * category picked when posting, so list rows usually need this fallback.
+ */
+export function jobCategoryId(job: { categoryId?: string; skills?: Skill[] }): string | undefined {
+  if (job.categoryId) return job.categoryId;
+  for (const s of job.skills ?? []) {
+    const id = SKILL_TO_CATEGORY[s];
+    if (id) return id;
+  }
+  return undefined;
+}
+
 export function mapCategoriesToSkills(categoryIds?: string[] | null): Skill[] {
   if (!categoryIds || categoryIds.length === 0) return [];
   const skillsSet = new Set<Skill>();

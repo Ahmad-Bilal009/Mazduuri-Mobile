@@ -5,6 +5,7 @@ import type {
   SignInSuccessResponse,
   NativeModuleError,
 } from "@react-native-google-signin/google-signin";
+import { NativeModules, TurboModuleRegistry } from "react-native";
 
 /**
  * Google Sign-In.
@@ -43,6 +44,18 @@ let moduleCache: GoogleModule | null | undefined;
  */
 function getModule(): GoogleModule | null {
   if (moduleCache !== undefined) return moduleCache;
+
+  // Check the binary before requiring the JS package. A try/catch alone is
+  // not enough: in development Metro reports a throwing module factory to the
+  // global error handler (the red "Uncaught Error" screen) before our catch
+  // ever runs. `TurboModuleRegistry.get` returns null instead of throwing.
+  const native =
+    TurboModuleRegistry.get("RNGoogleSignin") ?? NativeModules.RNGoogleSignin ?? null;
+  if (!native) {
+    moduleCache = null;
+    return moduleCache;
+  }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     moduleCache = require("@react-native-google-signin/google-signin") as GoogleModule;

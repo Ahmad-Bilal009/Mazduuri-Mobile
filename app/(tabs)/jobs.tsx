@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -8,22 +8,49 @@ import {
   FlatList,
   ActivityIndicator,
   Platform,
+  ScrollView,
+  Modal,
+  Pressable,
+  useWindowDimensions,
 } from "react-native";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Marker, PROVIDER_GOOGLE, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { jobsApi } from "@/lib/api";
+import { getAllCategories } from "@/lib/categories";
+import { categoryIcon, categoryVisual } from "@/lib/categoryIcons";
+import { CategoryIcon } from "@/components/CategoryIcon";
+import { formatCurrency, DURATION_LABELS, jobCategoryId, mapCategoriesToSkills, mapHeightFor } from "@/lib/utils";
 import { JobDetailCard } from "@/components/JobDetailCard";
-import { getCategory } from "@/lib/categories";
 import { MapLocationPicker } from "@/components/MapLocationPicker";
-import { DURATION_LABELS } from "@/lib/utils";
-import type { Job } from "@/types";
+import type { Job, JobDuration } from "@/types";
 
 interface JobWithDistance extends Job {
   distance?: number;
 }
+
+type QuickFilter = "all" | "nearby" | "newest" | "top_pay";
+
+interface SheetFilters {
+  categoryId?: string;
+  minBudget?: number;
+  maxBudget?: number;
+  duration?: JobDuration;
+}
+
+const QUICK_FILTERS: { key: QuickFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "nearby", label: "Nearby" },
+  { key: "newest", label: "Newest" },
+  { key: "top_pay", label: "Top Paying" },
+];
+
+const DURATIONS: JobDuration[] = ["one_day", "few_days", "one_week", "one_month", "ongoing"];
+
+const NEARBY_KM = 20;
+const DEFAULT_DELTA = { latitudeDelta: 0.08, longitudeDelta: 0.08 };
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -38,236 +65,309 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-const CATEGORY_COLORS = ["#f0fdf4", "#eff6ff", "#fef3c7", "#fce7f3", "#f3e8ff"];
-const CATEGORY_BORDER = ["#bbf7d0", "#bfdbfe", "#fde68a", "#fbcfe8", "#e9d5ff"];
-
-function categoryStyle(catId: string) {
-  const i = catId.charCodeAt(0) % CATEGORY_COLORS.length;
-  return { bg: CATEGORY_COLORS[i], border: CATEGORY_BORDER[i] };
-}
-
 export default function JobsScreen() {
   const router = useRouter();
+  const mapRef = useRef<MapView>(null);
+  const { height: windowHeight } = useWindowDimensions();
+
   const [jobs, setJobs] = useState<JobWithDistance[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const [search, setSearch] = useState("");
+  const [city, setCity] = useState(""); // debounced search
+  const [quick, setQuick] = useState<QuickFilter>("all");
+  const [filters, setFilters] = useState<SheetFilters>({});
+  const [sheetVisible, setSheetVisible] = useState(false);
+
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [selectedJob, setSelectedJob] = useState<JobWithDistance | null>(null);
-  const [region, setRegion] = useState({
-    latitude: 31.5204,
-    longitude: 74.3587,
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
-  });
+  const [initialRegion] = useState<Region>({ latitude: 31.5204, longitude: 74.3587, ...DEFAULT_DELTA });
 
+  // Current location
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
-        const loc = await Location.getCurrentPositionAsync({});
-        const { latitude, longitude } = loc.coords;
-        setUserLocation({ latitude, longitude });
-        setRegion({ latitude, longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 });
-      }
+      if (status !== "granted") return;
+      const loc = await Location.getCurrentPositionAsync({});
+      const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      setUserLocation(coords);
+      mapRef.current?.animateToRegion({ ...coords, ...DEFAULT_DELTA }, 400);
     })();
   }, []);
 
-  const fetchJobs = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await jobsApi.list({ page: 1, status: "open" });
-      const withDist = res.data.map((j) => ({
-        ...j,
-        distance:
-          userLocation && j.latitude && j.longitude
-            ? getDistance(userLocation.latitude, userLocation.longitude, j.latitude, j.longitude)
-            : undefined,
-      }));
-      withDist.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity));
-      setJobs(withDist);
-    } catch {
-      // silently ignore
-    } finally {
-      setLoading(false);
-    }
-  }, [userLocation]);
-
+  // Debounce the city search so typing doesn't fire a request per keystroke
   useEffect(() => {
-    fetchJobs();
-  }, [fetchJobs]);
+    const t = setTimeout(() => setCity(search.trim()), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Fetch from the API whenever server-side filters change
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    jobsApi
+      .list({
+        page: 1,
+        limit: 30,
+        status: "open",
+        city: city || undefined,
+        skills: filters.categoryId ? mapCategoriesToSkills([filters.categoryId]) : undefined,
+        minBudget: filters.minBudget,
+        maxBudget: filters.maxBudget,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setJobs(res.data);
+        setTotal(res.total);
+      })
+      .catch(() => {
+        if (!cancelled) setJobs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [city, filters.categoryId, filters.minBudget, filters.maxBudget]);
+
+  // Distance + client-side quick filters
+  const visible = useMemo<JobWithDistance[]>(() => {
+    let list = jobs.map((j) => ({
+      ...j,
+      distance:
+        userLocation && j.latitude && j.longitude
+          ? getDistance(userLocation.latitude, userLocation.longitude, j.latitude, j.longitude)
+          : undefined,
+    }));
+    if (filters.duration) list = list.filter((j) => j.duration === filters.duration);
+    if (quick === "nearby") list = list.filter((j) => (j.distance ?? Infinity) <= NEARBY_KM);
+
+    if (quick === "newest") {
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } else if (quick === "top_pay") {
+      list.sort((a, b) => (b.budget ?? 0) - (a.budget ?? 0));
+    } else {
+      list.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity));
+    }
+    return list;
+  }, [jobs, userLocation, quick, filters.duration]);
+
+  const activeFilterCount =
+    (filters.categoryId ? 1 : 0) +
+    (filters.minBudget || filters.maxBudget ? 1 : 0) +
+    (filters.duration ? 1 : 0);
+
+  function selectQuick(key: QuickFilter) {
+    if (key === "nearby" && !userLocation) {
+      setLocationPickerVisible(true);
+    }
+    setQuick(key);
+  }
 
   function centerOnUser() {
     if (userLocation) {
-      setRegion({ ...userLocation, latitudeDelta: 0.08, longitudeDelta: 0.08 });
+      mapRef.current?.animateToRegion({ ...userLocation, ...DEFAULT_DELTA }, 400);
+    } else {
+      setLocationPickerVisible(true);
     }
   }
 
-  const nearbyCount = jobs.filter((j) => (j.distance ?? Infinity) <= 20).length;
+  const subtitle =
+    quick === "nearby"
+      ? `${visible.length} ${visible.length === 1 ? "job" : "jobs"} within ${NEARBY_KM} km`
+      : quick === "newest"
+        ? "Most recently posted first"
+        : quick === "top_pay"
+          ? "Highest budgets first"
+          : city
+            ? `Showing jobs in "${city}"`
+            : "Showing all open jobs around you";
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Jobs Near You</Text>
-        <TouchableOpacity style={styles.pinBtn} onPress={() => setLocationPickerVisible(true)}>
-          <MaterialCommunityIcons name="crosshairs-gps" size={20} color="#16a34a" />
+      {/* ── Search ─────────────────────────────────────────── */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchBar}>
+          <MaterialCommunityIcons name="magnify" size={20} color="#64748b" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search jobs by city..."
+            placeholderTextColor="#64748b"
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+            onSubmitEditing={() => setCity(search.trim())}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
+              <MaterialCommunityIcons name="close-circle" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity style={styles.locateBtn} onPress={() => setLocationPickerVisible(true)}>
+          <MaterialCommunityIcons name="crosshairs-gps" size={22} color="#16a34a" />
         </TouchableOpacity>
       </View>
 
-      {/* Map */}
-      <View style={styles.mapWrap}>
+      {/* ── Filter chips ───────────────────────────────────── */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
+        style={styles.chipsScroll}
+      >
+        <TouchableOpacity style={styles.filtersChip} onPress={() => setSheetVisible(true)}>
+          <MaterialCommunityIcons name="tune-variant" size={16} color="#fff" />
+          <Text style={styles.filtersChipText}>Filters</Text>
+          {activeFilterCount > 0 && (
+            <View style={styles.filtersBadge}>
+              <Text style={styles.filtersBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+        {QUICK_FILTERS.map((f) => {
+          const active = quick === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.chip, active && styles.chipActive]}
+              onPress={() => selectQuick(f.key)}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* ── Map card (stays fixed while the list scrolls) ──── */}
+      <View style={[styles.mapCard, { height: mapHeightFor(windowHeight) }]}>
         <MapView
-          style={styles.map}
+          ref={mapRef}
+          style={StyleSheet.absoluteFill}
           provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
-          region={region}
-          onRegionChangeComplete={setRegion}
+          initialRegion={initialRegion}
+          showsPointsOfInterests={false}
+          toolbarEnabled={false}
+          onPress={() => setSelectedJob(null)}
         >
           {userLocation && (
-            <Marker coordinate={userLocation} title="You">
-              <View style={styles.myDotOuter}>
-                <View style={styles.myDot} />
+            <Marker coordinate={userLocation} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
+              <View style={styles.meHalo}>
+                <View style={styles.meDot}>
+                  <View style={styles.meDotInner} />
+                </View>
               </View>
             </Marker>
           )}
 
-          {jobs.map((j) =>
+          {visible.map((j) =>
             j.latitude && j.longitude ? (
               <Marker
                 key={j.id}
                 coordinate={{ latitude: j.latitude, longitude: j.longitude }}
-                title={j.title}
-                onPress={() => setSelectedJob(j)}
+                anchor={{ x: 0.5, y: 0.5 }}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setSelectedJob(j);
+                }}
               >
-                <View style={styles.pin}>
-                  <View
-                    style={[
-                      styles.pinBubble,
-                      {
-                        backgroundColor: categoryStyle(j.categoryId).bg,
-                        borderColor: categoryStyle(j.categoryId).border,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.pinIcon}>
-                      {getCategory(j.categoryId)?.icon ?? "💼"}
-                    </Text>
-                  </View>
-                  {j.distance !== undefined && (
-                    <View style={styles.pinTag}>
-                      <Text style={styles.pinTagText}>{j.distance.toFixed(1)} km</Text>
-                    </View>
-                  )}
+                <View style={[styles.pin, { backgroundColor: categoryVisual(jobCategoryId(j)).fg }]}>
+                  <MaterialCommunityIcons name={categoryIcon(jobCategoryId(j))} size={20} color="#fff" />
                 </View>
               </Marker>
             ) : null,
           )}
         </MapView>
 
-        {/* Re-center */}
         <TouchableOpacity style={styles.recenterBtn} onPress={centerOnUser}>
-          <MaterialCommunityIcons name="navigation" size={20} color="#16a34a" />
+          <MaterialCommunityIcons name="send-outline" size={20} color="#16a34a" />
         </TouchableOpacity>
 
-        {/* Selected job mini-card */}
         {selectedJob && (
           <TouchableOpacity
             style={styles.miniCard}
-            onPress={() => router.push(`/jobs/${selectedJob.id}`)}
             activeOpacity={0.9}
+            onPress={() => router.push(`/jobs/${selectedJob.id}`)}
           >
-            <View
-              style={[
-                styles.miniIcon,
-                {
-                  backgroundColor: categoryStyle(selectedJob.categoryId).bg,
-                  borderColor: categoryStyle(selectedJob.categoryId).border,
-                },
-              ]}
-            >
-              <Text style={{ fontSize: 22 }}>
-                {getCategory(selectedJob.categoryId)?.icon ?? "💼"}
-              </Text>
-            </View>
+            <CategoryIcon id={jobCategoryId(selectedJob)} size={40} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.miniTitle} numberOfLines={1}>{selectedJob.title}</Text>
-              {selectedJob.city && (
-                <Text style={styles.miniCity} numberOfLines={1}>
-                  <MaterialCommunityIcons name="map-marker" size={11} color="#9ca3af" /> {selectedJob.city}
-                </Text>
-              )}
-              <View style={styles.miniMeta}>
-                {selectedJob.budget && (
-                  <Text style={styles.miniBudget}>PKR {selectedJob.budget.toLocaleString()}</Text>
-                )}
-                {selectedJob.duration && (
-                  <Text style={styles.miniDuration}>{DURATION_LABELS[selectedJob.duration]}</Text>
-                )}
-              </View>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={20} color="#9ca3af" />
-            <TouchableOpacity
-              style={styles.miniClose}
-              onPress={() => setSelectedJob(null)}
-              hitSlop={8}
-            >
-              <MaterialCommunityIcons name="close" size={16} color="#6b7280" />
-            </TouchableOpacity>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Bottom panel */}
-      <View style={styles.panel}>
-        <View style={styles.panelHeader}>
-          <View>
-            <Text style={styles.panelTitle}>Available Jobs</Text>
-            {!loading && (
-              <Text style={styles.panelSub}>
-                {nearbyCount > 0 ? `${nearbyCount} within 20 km` : `${jobs.length} total`}
+              <Text style={styles.miniName} numberOfLines={1}>
+                {selectedJob.title}
               </Text>
-            )}
-          </View>
-          <TouchableOpacity style={styles.listBtn} onPress={() => router.push("/jobs-list")}>
-            <MaterialCommunityIcons name="format-list-bulleted" size={14} color="#16a34a" />
-            <Text style={styles.listBtnText}>View All</Text>
+              <Text style={styles.miniMeta} numberOfLines={1}>
+                {formatCurrency(selectedJob.budget)} · {DURATION_LABELS[selectedJob.duration]}
+                {selectedJob.distance !== undefined ? ` · ${selectedJob.distance.toFixed(1)} km` : ""}
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={20} color="#94a3b8" />
           </TouchableOpacity>
-        </View>
-
-        {loading ? (
-          <ActivityIndicator color="#16a34a" style={{ marginVertical: 16 }} />
-        ) : (
-          <FlatList
-            data={jobs.slice(0, 5)}
-            keyExtractor={(j) => j.id}
-            scrollEnabled
-            nestedScrollEnabled
-            contentContainerStyle={styles.panelList}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <JobDetailCard job={item} onPress={() => router.push(`/jobs/${item.id}`)} />
-            )}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={{ fontSize: 36 }}>💼</Text>
-                <Text style={styles.emptyText}>No jobs found nearby</Text>
-              </View>
-            }
-            ListFooterComponent={
-              jobs.length > 5 ? (
-                <TouchableOpacity style={styles.seeAllBtn} onPress={() => router.push("/jobs-list")}>
-                  <Text style={styles.seeAllText}>See all {jobs.length} jobs →</Text>
-                </TouchableOpacity>
-              ) : null
-            }
-          />
         )}
       </View>
+
+      {/* ── Job list ───────────────────────────────────────── */}
+      <FlatList
+        data={loading ? [] : visible}
+        keyExtractor={(j) => j.id}
+        style={styles.list}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={styles.listHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.listTitle}>Nearby Jobs</Text>
+              <Text style={styles.listSub} numberOfLines={1}>
+                {subtitle}
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.viewAllBtn} onPress={() => router.push("/jobs-list")}>
+              <MaterialCommunityIcons name="format-list-bulleted" size={16} color="#16a34a" />
+              <Text style={styles.viewAllText}>View All</Text>
+            </TouchableOpacity>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <JobDetailCard job={item} onPress={() => router.push(`/jobs/${item.id}`)} />
+        )}
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator color="#16a34a" style={{ marginVertical: 24 }} />
+          ) : (
+            <View style={styles.empty}>
+              <MaterialCommunityIcons name="briefcase-search-outline" size={40} color="#cbd5e1" />
+              <Text style={styles.emptyTitle}>No jobs found</Text>
+              <Text style={styles.emptySub}>Try another city or clear your filters.</Text>
+            </View>
+          )
+        }
+        ListFooterComponent={
+          !loading && total > jobs.length ? (
+            <TouchableOpacity style={styles.seeAllBtn} onPress={() => router.push("/jobs-list")}>
+              <Text style={styles.seeAllText}>See all {total} jobs</Text>
+              <MaterialCommunityIcons name="arrow-right" size={16} color="#16a34a" />
+            </TouchableOpacity>
+          ) : null
+        }
+      />
+
+      <FiltersSheet
+        visible={sheetVisible}
+        value={filters}
+        onClose={() => setSheetVisible(false)}
+        onApply={(f) => {
+          setFilters(f);
+          setSheetVisible(false);
+        }}
+      />
 
       <MapLocationPicker
         visible={locationPickerVisible}
         onLocationSelected={(loc) => {
-          setUserLocation({ latitude: loc.latitude, longitude: loc.longitude });
-          setRegion({ latitude: loc.latitude, longitude: loc.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 });
+          const coords = { latitude: loc.latitude, longitude: loc.longitude };
+          setUserLocation(coords);
+          mapRef.current?.animateToRegion({ ...coords, ...DEFAULT_DELTA }, 400);
           setLocationPickerVisible(false);
         }}
         onCancel={() => setLocationPickerVisible(false)}
@@ -278,73 +378,257 @@ export default function JobsScreen() {
   );
 }
 
+// ─── Filters bottom sheet ─────────────────────────────────────────────────────
+
+function FiltersSheet({
+  visible,
+  value,
+  onClose,
+  onApply,
+}: {
+  visible: boolean;
+  value: SheetFilters;
+  onClose: () => void;
+  onApply: (f: SheetFilters) => void;
+}) {
+  const categories = useMemo(() => getAllCategories(), []);
+  const [categoryId, setCategoryId] = useState<string | undefined>(value.categoryId);
+  const [minBudget, setMinBudget] = useState(value.minBudget ? String(value.minBudget) : "");
+  const [maxBudget, setMaxBudget] = useState(value.maxBudget ? String(value.maxBudget) : "");
+  const [duration, setDuration] = useState<JobDuration | undefined>(value.duration);
+
+  // Re-seed the draft from applied values each time the sheet opens
+  useEffect(() => {
+    if (!visible) return;
+    setCategoryId(value.categoryId);
+    setMinBudget(value.minBudget ? String(value.minBudget) : "");
+    setMaxBudget(value.maxBudget ? String(value.maxBudget) : "");
+    setDuration(value.duration);
+  }, [visible]);
+
+  const toNum = (s: string) => {
+    const n = parseInt(s.replace(/[^0-9]/g, ""), 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandle} />
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>Filters</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={10}>
+            <MaterialCommunityIcons name="close" size={22} color="#0f172a" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
+          <Text style={styles.sheetLabel}>Category</Text>
+          <View style={styles.sheetChips}>
+            {categories.map((c) => {
+              const active = categoryId === c.id;
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.sheetChip, active && styles.sheetChipActive]}
+                  onPress={() => setCategoryId(active ? undefined : c.id)}
+                >
+                  <Text style={[styles.sheetChipText, active && styles.sheetChipTextActive]}>
+                    {c.icon} {c.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={styles.sheetLabel}>Budget (Rs.)</Text>
+          <View style={styles.wageRow}>
+            <TextInput
+              style={styles.wageInput}
+              placeholder="Min"
+              placeholderTextColor="#94a3b8"
+              keyboardType="number-pad"
+              value={minBudget}
+              onChangeText={setMinBudget}
+            />
+            <Text style={{ color: "#94a3b8" }}>–</Text>
+            <TextInput
+              style={styles.wageInput}
+              placeholder="Max"
+              placeholderTextColor="#94a3b8"
+              keyboardType="number-pad"
+              value={maxBudget}
+              onChangeText={setMaxBudget}
+            />
+          </View>
+
+          <Text style={[styles.sheetLabel, { marginTop: 18 }]}>Duration</Text>
+          <View style={styles.sheetChips}>
+            {DURATIONS.map((d) => {
+              const active = duration === d;
+              return (
+                <TouchableOpacity
+                  key={d}
+                  style={[styles.sheetChip, active && styles.sheetChipActive]}
+                  onPress={() => setDuration(active ? undefined : d)}
+                >
+                  <Text style={[styles.sheetChipText, active && styles.sheetChipTextActive]}>
+                    {DURATION_LABELS[d]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
+
+        <View style={styles.sheetActions}>
+          <TouchableOpacity
+            style={styles.resetBtn}
+            onPress={() => {
+              setCategoryId(undefined);
+              setMinBudget("");
+              setMaxBudget("");
+              setDuration(undefined);
+              onApply({});
+            }}
+          >
+            <Text style={styles.resetText}>Reset</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.applyBtn}
+            onPress={() =>
+              onApply({ categoryId, minBudget: toNum(minBudget), maxBudget: toNum(maxBudget), duration })
+            }
+          >
+            <Text style={styles.applyText}>Apply filters</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Styles (kept identical to the Workers tab) ───────────────────────────────
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#fff" },
-  header: {
+  safe: { flex: 1, backgroundColor: "#f8fafc" },
+
+  searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 10,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    paddingTop: 8,
   },
-  headerTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
-  pinBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "#f0fdf4",
+  searchBar: {
+    flex: 1,
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: "#f1f5f9",
     borderWidth: 1,
-    borderColor: "#dcfce7",
+    borderColor: "#e2e8f0",
+  },
+  searchInput: { flex: 1, fontSize: 15, color: "#0f172a", paddingVertical: 0 },
+  locateBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#dcfce7",
     alignItems: "center",
     justifyContent: "center",
   },
-  mapWrap: { flex: 1, position: "relative" },
-  map: { flex: 1 },
-  myDotOuter: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "rgba(37,99,235,0.2)",
+
+  chipsScroll: { flexGrow: 0 },
+  chipsRow: { gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
+  filtersChip: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#2563eb",
+    gap: 6,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "#0f172a",
   },
-  myDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#2563eb" },
-  pin: { alignItems: "center" },
-  pinBubble: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+  filtersChipText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  filtersBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: "#22c55e",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
+  },
+  filtersBadgeText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+  chip: {
+    height: 36,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    justifyContent: "center",
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  chipActive: { backgroundColor: "#dcfce7", borderColor: "#86efac" },
+  chipText: { fontSize: 14, fontWeight: "600", color: "#0f172a" },
+  chipTextActive: { color: "#15803d" },
+
+  mapCard: {
+    marginHorizontal: 16,
+    borderRadius: 24,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#e5e7eb",
+  },
+  meHalo: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(34,197,94,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  meDot: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#22c55e",
+    borderWidth: 3,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
+  },
+  meDotInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#fff" },
+  pin: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 3,
+    borderColor: "#fff",
+    backgroundColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
-  pinIcon: { fontSize: 22 },
-  pinTag: {
-    backgroundColor: "#fff",
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    marginTop: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  pinTagText: { fontSize: 10, fontWeight: "700", color: "#111827" },
   recenterBtn: {
     position: "absolute",
-    bottom: 16,
-    right: 16,
+    right: 12,
+    bottom: 12,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -352,85 +636,140 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
   miniCard: {
     position: "absolute",
-    bottom: 16,
-    left: 16,
-    right: 72,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 12,
+    left: 12,
+    right: 68,
+    bottom: 12,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    padding: 10,
+    borderRadius: 16,
+    backgroundColor: "#fff",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.15,
     shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
     elevation: 5,
   },
-  miniIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1.5,
+  miniAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "#dcfce7",
     alignItems: "center",
     justifyContent: "center",
   },
-  miniTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  miniCity: { fontSize: 12, color: "#9ca3af", marginTop: 1 },
-  miniMeta: { flexDirection: "row", gap: 8, marginTop: 2 },
-  miniBudget: { fontSize: 12, color: "#16a34a", fontWeight: "700" },
-  miniDuration: { fontSize: 12, color: "#6b7280" },
-  miniClose: { position: "absolute", top: 8, right: 8 },
-  panel: {
-    maxHeight: "42%",
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 12,
+  miniName: { fontSize: 14, fontWeight: "700", color: "#0f172a" },
+  miniMeta: { fontSize: 12, color: "#16a34a", fontWeight: "600", marginTop: 2 },
+
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
   },
-  panelHeader: {
+  listTitle: { fontSize: 20, fontWeight: "800", color: "#0f172a" },
+  listSub: { fontSize: 13, color: "#475569", marginTop: 2 },
+  viewAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "#dcfce7",
+  },
+  viewAllText: { fontSize: 14, fontWeight: "700", color: "#16a34a" },
+  empty: { alignItems: "center", paddingVertical: 32, gap: 6 },
+  emptyTitle: { fontSize: 15, fontWeight: "700", color: "#334155" },
+  emptySub: { fontSize: 13, color: "#94a3b8" },
+  seeAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: "#dcfce7",
+  },
+  seeAllText: { fontSize: 14, fontWeight: "700", color: "#16a34a" },
+
+  sheetBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.4)" },
+  sheet: {
+    maxHeight: "80%",
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingBottom: 28,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#e2e8f0",
+    marginTop: 10,
+  },
+  sheetHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingVertical: 14,
   },
-  panelTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  panelSub: { fontSize: 12, color: "#9ca3af", marginTop: 1 },
-  listBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#f0fdf4",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+  sheetTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
+  sheetLabel: { fontSize: 13, fontWeight: "700", color: "#475569", marginTop: 8, marginBottom: 10 },
+  sheetChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  sheetChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#f1f5f9",
     borderWidth: 1,
-    borderColor: "#dcfce7",
+    borderColor: "#e2e8f0",
   },
-  listBtnText: { fontSize: 12, fontWeight: "600", color: "#16a34a" },
-  panelList: { paddingHorizontal: 12, paddingBottom: 12 },
-  empty: { alignItems: "center", paddingVertical: 20, gap: 6 },
-  emptyText: { fontSize: 14, color: "#9ca3af", fontWeight: "500" },
-  seeAllBtn: {
-    marginHorizontal: 4,
-    marginTop: 4,
-    marginBottom: 8,
-    paddingVertical: 12,
-    backgroundColor: "#f0fdf4",
-    borderRadius: 12,
-    alignItems: "center",
+  sheetChipActive: { backgroundColor: "#dcfce7", borderColor: "#86efac" },
+  sheetChipText: { fontSize: 13, color: "#0f172a", fontWeight: "500" },
+  sheetChipTextActive: { color: "#15803d", fontWeight: "700" },
+  wageRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  wageInput: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: "#0f172a",
+    backgroundColor: "#f1f5f9",
     borderWidth: 1,
-    borderColor: "#dcfce7",
+    borderColor: "#e2e8f0",
   },
-  seeAllText: { fontSize: 14, fontWeight: "700", color: "#16a34a" },
+  sheetActions: { flexDirection: "row", gap: 10, paddingTop: 12 },
+  resetBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f1f5f9",
+  },
+  resetText: { fontSize: 15, fontWeight: "700", color: "#0f172a" },
+  applyBtn: {
+    flex: 2,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#22c55e",
+  },
+  applyText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 });

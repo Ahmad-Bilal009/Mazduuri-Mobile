@@ -315,8 +315,10 @@ export default function EditWorkerProfileScreen() {
           </TouchableOpacity>
         )}
         {editing && (
-          <TouchableOpacity onPress={cancelEditing}>
-            <Text style={styles.cancelText}>Cancel</Text>
+          <TouchableOpacity onPress={handleSave} disabled={saving} hitSlop={8}>
+            <Text style={[styles.headerSave, saving && { opacity: 0.5 }]}>
+              {saving ? "Saving…" : "Save"}
+            </Text>
           </TouchableOpacity>
         )}
       </View>
@@ -485,24 +487,27 @@ export default function EditWorkerProfileScreen() {
             /* ── REJECTED / NEW: full edit ── */
             <>
               {/* Profile picture */}
-              <View style={styles.pickerRow}>
-                <TouchableOpacity style={styles.pickerAvatar} onPress={handlePickImage} disabled={uploadingImage}>
+              <TouchableOpacity
+                style={styles.photoPicker}
+                onPress={handlePickImage}
+                disabled={uploadingImage}
+                activeOpacity={0.85}
+              >
+                <View style={styles.photoCircle}>
                   {uploadingImage ? (
-                    <ActivityIndicator color="#16a34a" />
+                    <ActivityIndicator color="#fff" />
                   ) : profilePicture ? (
-                    <Image source={{ uri: profilePicture }} style={styles.avatarImage} />
+                    <Image source={{ uri: profilePicture }} style={styles.photoImg} />
                   ) : (
-                    <Text style={styles.avatarText}>
+                    <Text style={styles.photoInitials}>
                       {name ? name.slice(0, 2).toUpperCase() : "?"}
                     </Text>
                   )}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.changePhotoBtn} onPress={handlePickImage} disabled={uploadingImage}>
-                  <Text style={styles.changePhotoText}>
-                    {profilePicture ? "Change Photo" : "Add Photo"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                </View>
+                <View style={styles.cameraBadge}>
+                  <MaterialCommunityIcons name="camera" size={18} color="#fff" />
+                </View>
+              </TouchableOpacity>
 
               {/* Identity Verification */}
               <View style={styles.verifySection}>
@@ -562,7 +567,7 @@ export default function EditWorkerProfileScreen() {
                 placeholder="e.g. Muhammad Ali"
               />
 
-              <PhoneField value={phone} onChange={setPhone} />
+              <PhoneField value={phone} onChange={setPhone} labelStyle={styles.label} />
 
               <Text style={styles.label}>Daily Wage (PKR) *</Text>
               <TextInput
@@ -651,19 +656,44 @@ export default function EditWorkerProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f9fafb" },
+  headerSave: { color: "#16a34a", fontWeight: "700", fontSize: 16 },
+  photoPicker: { alignSelf: "center", marginTop: 8, marginBottom: 12 },
+  photoCircle: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  photoImg: { width: 128, height: 128 },
+  photoInitials: { color: "#fff", fontWeight: "800", fontSize: 40 },
+  cameraBadge: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#16a34a",
+    borderWidth: 3,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  safe: { flex: 1, backgroundColor: "#fff" },
   header: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
   backBtn: { marginRight: 8 },
   backArrow: { fontSize: 28, color: "#374151", lineHeight: 30 },
-  headerTitle: { flex: 1, fontSize: 17, fontWeight: "700", color: "#111827" },
+  headerTitle: { flex: 1, fontSize: 19, fontWeight: "800", color: "#0f172a", textAlign: "center" },
   editBtn: {
     backgroundColor: "#f0fdf4",
     borderRadius: 20,
@@ -761,16 +791,17 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
   emptyTitle: { fontSize: 20, fontWeight: "700", color: "#111827", marginBottom: 8 },
   emptyDesc: { fontSize: 14, color: "#6b7280", textAlign: "center", lineHeight: 20, marginBottom: 24 },
-  label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6, marginTop: 14 },
+  label: { fontSize: 13, fontWeight: "600", color: "#16a34a", marginBottom: 8, marginTop: 16 },
   input: {
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
-    color: "#111827",
+    color: "#0f172a",
+    backgroundColor: "#fff",
   },
   textArea: { height: 100, textAlignVertical: "top" },
   locationBtn: {
@@ -790,13 +821,19 @@ const styles = StyleSheet.create({
   locationBtnCoords: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
   locationBtnArrow: { fontSize: 16, color: "#d1d5db" },
   saveBtn: {
-    backgroundColor: "#16a34a",
+    marginTop: 28,
+    height: 54,
     borderRadius: 14,
-    paddingVertical: 15,
+    backgroundColor: "#16a34a",
     alignItems: "center",
-    marginTop: 24,
+    justifyContent: "center",
+    shadowColor: "#16a34a",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  saveBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  saveBtnText: { color: "#fff", fontWeight: "800", fontSize: 17 },
   disabled: { opacity: 0.6 },
   approvalBanner: {
     flexDirection: "row",

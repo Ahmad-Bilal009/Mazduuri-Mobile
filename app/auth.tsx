@@ -9,11 +9,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Image,
   Alert,
+  Pressable,
 } from "react-native";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { authApi, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
@@ -26,728 +26,822 @@ import {
 } from "@/lib/googleAuth";
 import type { AuthResponse } from "@/types";
 
-type Step = "method" | "email" | "phone" | "otp" | "role";
-
-/** Which entry path the pending role step belongs to. */
-type PendingIdentity = "google" | "email" | "phone";
-
-const RESEND_SECONDS = 60;
-const MIN_PASSWORD = 8;
-
 /**
- * Shows the "phone number" entry point on the sign-in screen.
+ * Sign in / sign up.
  *
- * Off until phone verification ships. The whole phone → WhatsApp OTP → role
- * flow below is intact and the backend routes are live; this only controls
- * whether there is a way in from the UI. Flip to true to bring it back.
+ * - Sign in: mobile number or email + password.
+ * - Sign up: role, name, email, mobile, password → 6-digit code emailed →
+ *   account works once the code is entered.
+ * - Forgot password: code emailed to the account's address → new password.
+ * - Google: one tap; brand-new Google users pick a role first.
+ * - Guests can skip all of this and browse.
  */
-const PHONE_LOGIN_ENABLED = false;
+
+type Step = "signin" | "signup" | "verify" | "forgot" | "reset" | "googleRole";
+type Role = "client" | "worker";
+
+const MIN_PASSWORD = 8;
+const RESEND_SECONDS = 60;
+
+const GREEN = "#22c55e";
+const GREEN_DARK = "#16a34a";
+const INK = "#0f172a";
+const MUTED = "#475569";
+const BORDER = "#e2e8f0";
 
 export default function AuthScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ mode?: string; role?: string }>();
   const { setUser } = useAuthStore();
 
-  const [step, setStep] = useState<Step>("method");
-  const [pending, setPending] = useState<PendingIdentity>("phone");
+  const [step, setStep] = useState<Step>(params.mode === "signup" ? "signup" : "signin");
 
-  // Phone / OTP — kept alongside the new paths; phone verification is planned
-  // for a later release and this flow stays reachable in the meantime.
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [activeOtpIndex, setActiveOtpIndex] = useState(0);
-  const [isNewUser, setIsNewUser] = useState(false);
-  const [resendIn, setResendIn] = useState(0);
-
-  // Email + password
-  const [email, setEmail] = useState("");
+  // Shared form state
+  const [identifier, setIdentifier] = useState(""); // sign in / forgot: mobile or email
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [authMode, setAuthMode] = useState<"register" | "login">("register");
+  const [role, setRole] = useState<Role>(params.role === "worker" ? "worker" : "client");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+
+  // Code steps
+  const [code, setCode] = useState("");
+  const [codeTarget, setCodeTarget] = useState(""); // identifier the code belongs to
+  const [codeNote, setCodeNote] = useState(""); // "We sent a code to a***@gmail.com"
+  const [resendIn, setResendIn] = useState(0);
+  const [newPassword, setNewPassword] = useState("");
 
   // Google
   const [googleIdToken, setGoogleIdToken] = useState<string | null>(null);
-  const [googleEmail, setGoogleEmail] = useState("");
 
-  // Basic account details
-  const [role, setRole] = useState<"worker" | "client">("client");
-  const [fullName, setFullName] = useState("");
-
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<null | "primary" | "google" | "resend">(null);
   const [error, setError] = useState("");
 
-  const otpRefs = useRef<(TextInput | null)[]>([]);
-
-  const normalizedPhone = `+92${phone.replace(/^0/, "")}`;
-  const displayPhone = `+92 ${phone.replace(/^0/, "").replace(/(\d{3})(\d{7})/, "$1 $2")}`;
-
-  // Resend countdown
   useEffect(() => {
     if (resendIn <= 0) return;
     const t = setInterval(() => setResendIn((s) => s - 1), 1000);
     return () => clearInterval(t);
   }, [resendIn > 0]);
 
-  // ─── Shared tail ───────────────────────────────────────────────────────────
+  function go(next: Step) {
+    setError("");
+    setStep(next);
+  }
 
-  /**
-   * Every successful sign-in ends here. A basic account is all that is needed
-   * to browse — the full profile (phone, location, documents) is completed
-   * later from the Profile tab, so nothing is forced on the way in.
-   */
-  async function afterAuth(_res: AuthResponse) {
-    setUser(_res.user, _res.token);
+  function leave() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)");
+  }
+
+  async function afterAuth(res: AuthResponse) {
+    setUser(res.user, res.token);
     // Warm the saved-workers set so hearts render correctly straight away.
     void useSavedStore.getState().hydrate();
-    router.back();
+    leave();
+  }
+
+  function startCodeStep(target: string, note: string, next: "verify" | "reset") {
+    setCodeTarget(target);
+    setCodeNote(note);
+    setCode("");
+    setNewPassword("");
+    setResendIn(RESEND_SECONDS);
+    go(next);
+  }
+
+  // ─── Sign in ───────────────────────────────────────────────────────────────
+
+  async function handleSignIn() {
+    const id = identifier.trim();
+    if (!id) return setError("Enter your mobile number or email");
+    if (!password) return setError("Enter your password");
+    setError("");
+    setLoading("primary");
+    try {
+      await afterAuth(await authApi.login(toIdentifier(id), password));
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.code === "EMAIL_NOT_VERIFIED") {
+        startCodeStep(toIdentifier(id), err.message, "verify");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not sign in");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  // ─── Sign up ───────────────────────────────────────────────────────────────
+
+  async function handleSignUp() {
+    if (fullName.trim().length < 2) return setError("Enter your full name");
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Enter a valid email address");
+    if (!/^0?3\d{9}$/.test(phone.trim())) return setError("Enter a valid mobile number, e.g. 300 1234567");
+    if (password.length < MIN_PASSWORD) {
+      return setError(`Password must be at least ${MIN_PASSWORD} characters`);
+    }
+    setError("");
+    setLoading("primary");
+    try {
+      const res = await authApi.register({
+        name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
+        password,
+        role,
+      });
+      startCodeStep(
+        email.trim().toLowerCase(),
+        `We sent a 6-digit code to ${res.destination}. Enter it to finish creating your account.`,
+        "verify",
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not create your account");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  // ─── Codes ─────────────────────────────────────────────────────────────────
+
+  async function handleVerify() {
+    if (code.length !== 6) return setError("Enter the 6-digit code");
+    setError("");
+    setLoading("primary");
+    try {
+      await afterAuth(await authApi.verifyEmail(codeTarget, code));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not verify the code");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function handleResend() {
+    setError("");
+    setLoading("resend");
+    try {
+      await authApi.resendEmailCode(codeTarget, step === "reset" ? "reset_password" : "verify_email");
+      setCode("");
+      setResendIn(RESEND_SECONDS);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not resend the code");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function handleForgot() {
+    const id = identifier.trim();
+    if (!id) return setError("Enter your mobile number or email");
+    setError("");
+    setLoading("primary");
+    try {
+      await authApi.forgotPassword(toIdentifier(id));
+      startCodeStep(
+        toIdentifier(id),
+        "If an account exists, we've emailed a 6-digit code to the address on it.",
+        "reset",
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not send the code");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function handleReset() {
+    if (code.length !== 6) return setError("Enter the 6-digit code");
+    if (newPassword.length < MIN_PASSWORD) {
+      return setError(`Password must be at least ${MIN_PASSWORD} characters`);
+    }
+    setError("");
+    setLoading("primary");
+    try {
+      await afterAuth(await authApi.resetPassword(codeTarget, code, newPassword));
+      Alert.alert("Password updated", "You're signed in with your new password.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not reset your password");
+    } finally {
+      setLoading(null);
+    }
   }
 
   // ─── Google ────────────────────────────────────────────────────────────────
 
-  async function handleGoogleSignIn() {
+  const googleReady = isGoogleAvailable();
+
+  async function handleGoogle() {
+    if (!googleReady) {
+      Alert.alert(
+        "Google sign-in unavailable",
+        isGoogleConfigured
+          ? "This build of the app doesn't include Google sign-in yet. Please use your mobile number or email."
+          : "Google sign-in isn't configured for this build. Please use your mobile number or email.",
+      );
+      return;
+    }
     setError("");
-    setLoading(true);
+    setLoading("google");
     try {
       const google = await signInWithGoogle();
-      setGoogleIdToken(google.idToken);
-      setGoogleEmail(google.email);
-
       try {
-        // Returning user — the backend already knows this Google account.
-        const res = await authApi.google(google.idToken);
-        await afterAuth(res);
+        await afterAuth(await authApi.google(google.idToken));
       } catch (err: unknown) {
         if (err instanceof ApiError && err.code === "ROLE_REQUIRED") {
-          if (google.name) setFullName(google.name);
-          setPending("google");
-          setStep("role");
+          // From sign-up the role is already chosen; from sign-in, ask once.
+          if (step === "signup") {
+            await afterAuth(
+              await authApi.google(google.idToken, role, fullName.trim() || google.name || undefined),
+            );
+          } else {
+            setGoogleIdToken(google.idToken);
+            if (google.name) setFullName(google.name);
+            go("googleRole");
+          }
           return;
         }
         throw err;
       }
     } catch (err: unknown) {
-      // Backing out of the Google sheet is a normal action, not a failure.
       if (err instanceof GoogleSignInCancelled) return;
       setError(err instanceof Error ? err.message : "Google sign-in failed");
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
-  async function completeGoogleSignUp(selectedRole: "worker" | "client") {
-    if (!googleIdToken) return;
+  async function finishGoogle() {
+    if (!googleIdToken) return go("signin");
+    if (fullName.trim().length < 2) return setError("Enter your full name");
     setError("");
-    setLoading(true);
+    setLoading("primary");
     try {
-      const res = await authApi.google(googleIdToken, selectedRole, fullName.trim());
-      await afterAuth(res);
+      await afterAuth(await authApi.google(googleIdToken, role, fullName.trim()));
     } catch (err: unknown) {
-      // Google ID tokens last about an hour; a stale one has to be re-issued.
+      // Google ID tokens last about an hour; a stale one needs a fresh sign-in.
       setError(err instanceof Error ? err.message : "Google sign-in failed");
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
-  // ─── Email + password ──────────────────────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────────────
 
-  function validateEmailStep(): boolean {
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
-      setError("Enter a valid email address");
-      return false;
-    }
-    if (authMode === "register" && password.length < MIN_PASSWORD) {
-      setError(`Password must be at least ${MIN_PASSWORD} characters`);
-      return false;
-    }
-    if (!password) {
-      setError("Enter your password");
-      return false;
-    }
-    return true;
-  }
+  const isEntry = step === "signin" || step === "signup";
 
-  async function handleEmailContinue() {
+  function back() {
     setError("");
-    if (!validateEmailStep()) return;
-
-    if (authMode === "login") {
-      setLoading(true);
-      try {
-        const res = await authApi.login(email.trim(), password);
-        await afterAuth(res);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Could not sign in");
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    // Registering: name and role are collected on the next step, then sent
-    // together so no half-built account exists if the user backs out.
-    setPending("email");
-    setStep("role");
-  }
-
-  async function completeEmailRegister(selectedRole: "worker" | "client") {
-    setError("");
-    setLoading(true);
-    try {
-      const res = await authApi.register({
-        email: email.trim(),
-        password,
-        name: fullName.trim(),
-        role: selectedRole,
-      });
-      await afterAuth(res);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Could not create account");
-      // Nothing was created, so send them back to fix the address or password.
-      if (err instanceof ApiError && err.code === "CONFLICT") setStep("email");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ─── Phone / OTP ───────────────────────────────────────────────────────────
-
-  async function handleSendOtp() {
-    setError("");
-    setLoading(true);
-    try {
-      const res = await authApi.sendOtp(normalizedPhone);
-      setIsNewUser(res.isNewUser);
-      setOtp(["", "", "", "", "", ""]);
-      setResendIn(RESEND_SECONDS);
-      setStep("otp");
-      setTimeout(() => otpRefs.current[0]?.focus(), 350);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to send OTP");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function completeVerification(selectedRole?: "worker" | "client") {
-    const code = otp.join("");
-    setError("");
-    setLoading(true);
-    try {
-      const res = await authApi.verifyOtp(normalizedPhone, code, selectedRole);
-      await afterAuth(res);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Invalid OTP");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleVerifyPressed() {
-    const code = otp.join("");
-    if (code.length < 6) {
-      setError("Enter all 6 digits");
-      return;
-    }
-    if (isNewUser) {
-      setError("");
-      setPending("phone");
-      setStep("role");
-    } else {
-      completeVerification();
-    }
-  }
-
-  function handleOtpChange(index: number, value: string) {
-    // Support pasting the whole code into one box
-    if (value.length > 1) {
-      const digits = value.replace(/\D/g, "").slice(0, 6).split("");
-      if (digits.length) {
-        const newOtp = ["", "", "", "", "", ""];
-        digits.forEach((d, i) => { newOtp[i] = d; });
-        setOtp(newOtp);
-        const next = Math.min(digits.length, 5);
-        otpRefs.current[next]?.focus();
-      }
-      return;
-    }
-    if (!/^\d?$/.test(value)) return;
-    const newOtp = [...otp];
-    newOtp[index] = value;
-    setOtp(newOtp);
-    if (value && index < 5) otpRefs.current[index + 1]?.focus();
-  }
-
-  function handleOtpKeyPress(index: number, key: string) {
-    if (key === "Backspace" && !otp[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus();
-    }
-  }
-
-  // ─── Role step ─────────────────────────────────────────────────────────────
-
-  function handleContinuePressed() {
-    if (fullName.trim().length < 2) {
-      setError("Please enter your full name");
-      return;
-    }
-    setError("");
-    if (pending === "google") completeGoogleSignUp(role);
-    else if (pending === "email") completeEmailRegister(role);
-    else completeVerification(role);
-  }
-
-  // ─── Navigation ────────────────────────────────────────────────────────────
-
-  function handleBack() {
-    setError("");
-    if (step === "otp") setStep("phone");
-    else if (step === "phone" || step === "email") setStep("method");
-    else if (step === "role") {
-      // Return to whichever path opened this step.
-      if (pending === "google") {
-        setGoogleIdToken(null);
-        setGoogleEmail("");
-        setStep("method");
-      } else if (pending === "email") {
-        setStep("email");
-      } else {
-        setStep("otp");
-      }
-    } else router.back();
-  }
-
-  const comingSoon = (provider: string) =>
-    Alert.alert(provider, `${provider} sign-in is coming soon. Please continue with Google or email.`);
-
-  // Which locked identity to show on the role step
-  const identity =
-    pending === "google"
-      ? { icon: "google" as const, label: "Google account", value: googleEmail }
-      : pending === "email"
-        ? { icon: "email-outline" as const, label: "Email", value: email.trim() }
-        : { icon: null, label: "Phone", value: displayPhone };
-
-  const bottomBarStep = step === "otp" || step === "role" || step === "email";
-
-  // Google needs both a Web client ID and the native module compiled into this
-  // binary. The two failure modes need different answers, so they are reported
-  // separately rather than as one "unavailable".
-  const googleReady = isGoogleAvailable();
-
-  function explainGoogleUnavailable() {
-    Alert.alert(
-      "Google sign-in unavailable",
-      isGoogleConfigured
-        ? "This build of the app doesn't include Google sign-in yet. Rebuild the app, or continue with email."
-        : "No Google client ID is configured for this build. Please continue with email.",
-    );
+    if (step === "verify") go(codeTarget.includes("@") && email ? "signup" : "signin");
+    else if (step === "forgot" || step === "googleRole") go("signin");
+    else if (step === "reset") go("forgot");
+    else leave();
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={{ flex: 1 }}
-      >
-        {/* Back */}
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={handleBack} hitSlop={10}>
-            <MaterialCommunityIcons name="arrow-left" size={26} color="#111827" />
-          </TouchableOpacity>
-        </View>
-
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={styles.container}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ── Step: Choose a method ── */}
-          {step === "method" && (
-            <>
-              <View style={styles.logoContainer}>
-                <Image
-                  source={require("../assets/icon.png")}
-                  style={styles.logoImage}
-                  resizeMode="contain"
-                />
-                <Text style={styles.title}>Welcome to Mazduuri</Text>
-                <Text style={styles.subtitle}>
-                  Create your account or log in to continue
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.socialBtn, loading && styles.disabled]}
-                onPress={googleReady ? handleGoogleSignIn : explainGoogleUnavailable}
-                disabled={loading}
-                activeOpacity={0.8}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#6b7280" />
-                ) : (
-                  <>
-                    <MaterialCommunityIcons name="google" size={20} color="#EA4335" />
-                    <Text style={styles.socialBtnText}>Continue with Google</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.waBtn}
-                onPress={() => {
-                  setAuthMode("register");
-                  setError("");
-                  setStep("email");
-                }}
-                activeOpacity={0.85}
-              >
-                <MaterialCommunityIcons name="email-outline" size={21} color="#fff" />
-                <Text style={styles.waBtnText}>Continue with Email</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.socialBtn}
-                onPress={() => comingSoon("Apple")}
-                activeOpacity={0.8}
-              >
-                <MaterialCommunityIcons name="apple" size={22} color="#111827" />
-                <Text style={styles.socialBtnText}>Continue with Apple</Text>
-              </TouchableOpacity>
-
-              {PHONE_LOGIN_ENABLED && (
-                <>
-                  <View style={styles.dividerRow}>
-                    <View style={styles.dividerLine} />
-                    <Text style={styles.dividerText}>or</Text>
-                    <View style={styles.dividerLine} />
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.textBtn}
-                    onPress={() => {
-                      setError("");
-                      setStep("phone");
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <MaterialCommunityIcons name="phone-outline" size={18} color="#16a34a" />
-                    <Text style={styles.textBtnLabel}>Use phone number instead</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {error ? <Text style={styles.error}>{error}</Text> : null}
-
-              <Text style={styles.terms}>
-                By continuing you agree to <Text style={styles.termsLink}>Terms</Text>
-                {" "}&{" "}<Text style={styles.termsLink}>Privacy</Text>
-              </Text>
-            </>
-          )}
-
-          {/* ── Step: Email + password ── */}
-          {step === "email" && (
-            <>
-              <Text style={styles.bigTitle}>
-                {authMode === "register" ? "Create account" : "Welcome back"}
-              </Text>
-              <Text style={styles.sentTo}>
-                {authMode === "register"
-                  ? "Use your email and a password you'll remember"
-                  : "Log in with your email and password"}
-              </Text>
-
-              <View style={styles.fieldBox}>
-                <MaterialCommunityIcons name="email-outline" size={20} color="#6b7280" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Email</Text>
-                  <TextInput
-                    style={styles.fieldInput}
-                    placeholder="you@example.com"
-                    placeholderTextColor="#9ca3af"
-                    value={email}
-                    onChangeText={setEmail}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="email"
-                    maxLength={254}
-                  />
+          {/* Top row: brand, or back for inner steps */}
+          <View style={styles.topRow}>
+            {isEntry ? (
+              <View style={styles.brand}>
+                <View style={styles.brandIcon}>
+                  <MaterialCommunityIcons name="hammer" size={24} color="#fff" />
                 </View>
+                <Text style={styles.brandText}>Mazduuri</Text>
               </View>
+            ) : (
+              <TouchableOpacity onPress={back} hitSlop={10} style={styles.backBtn}>
+                <MaterialCommunityIcons name="arrow-left" size={24} color={INK} />
+              </TouchableOpacity>
+            )}
+          </View>
 
-              <View style={styles.fieldBox}>
-                <MaterialCommunityIcons name="lock-outline" size={20} color="#6b7280" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Password</Text>
-                  <TextInput
-                    style={styles.fieldInput}
-                    placeholder={
-                      authMode === "register" ? `At least ${MIN_PASSWORD} characters` : "Your password"
-                    }
-                    placeholderTextColor="#9ca3af"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry={!showPassword}
-                    autoCapitalize="none"
-                    autoComplete={authMode === "register" ? "new-password" : "current-password"}
-                    maxLength={128}
-                    onSubmitEditing={handleEmailContinue}
-                    returnKeyType="go"
-                  />
-                </View>
-                <TouchableOpacity onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
-                  <MaterialCommunityIcons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
-                    color="#9ca3af"
-                  />
+          {isEntry && <TrustRow />}
+
+          {/* ── Sign in ── */}
+          {step === "signin" && (
+            <>
+              <Text style={styles.title}>Welcome back.</Text>
+              <Text style={styles.subtitle}>
+                Your next job—or the right person for it—is just a few taps away.
+              </Text>
+
+              <Label text="Mobile number or email" />
+              <IdentifierField value={identifier} onChange={setIdentifier} />
+
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Password</Text>
+                <TouchableOpacity onPress={() => go("forgot")} hitSlop={8}>
+                  <Text style={styles.link}>Forgot password?</Text>
                 </TouchableOpacity>
               </View>
+              <PasswordField
+                value={password}
+                onChange={setPassword}
+                show={showPassword}
+                onToggle={() => setShowPassword((v) => !v)}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                onSubmit={handleSignIn}
+              />
 
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <ErrorText text={error} />
+              <PrimaryButton label="Sign in" loading={loading === "primary"} onPress={handleSignIn} />
+              <OrDivider />
+              <GoogleButton loading={loading === "google"} onPress={handleGoogle} disabled={!!loading} />
 
-              <TouchableOpacity
-                style={styles.modeToggle}
-                onPress={() => {
-                  setAuthMode((m) => (m === "register" ? "login" : "register"));
-                  setError("");
-                }}
-                hitSlop={8}
-              >
-                <Text style={styles.modeToggleText}>
-                  {authMode === "register"
-                    ? "Already have an account? Log in"
-                    : "New here? Create an account"}
+              <Text style={styles.switchText}>
+                New to Mazduuri?{" "}
+                <Text style={styles.switchLink} onPress={() => go("signup")}>
+                  Create an account
                 </Text>
-              </TouchableOpacity>
+              </Text>
+              <GuestLink onPress={leave} />
+              <Footer />
             </>
           )}
 
-          {/* ── Step: Phone ── */}
-          {step === "phone" && (
+          {/* ── Sign up ── */}
+          {step === "signup" && (
             <>
-              <Text style={styles.bigTitle}>Your phone number</Text>
-              <Text style={styles.sentTo}>We'll send a one-time code over WhatsApp</Text>
+              <Text style={styles.title}>Find your people.</Text>
+              <Text style={styles.subtitle}>
+                One simple account to get the work done—or get your next job.
+              </Text>
 
-              <View style={styles.phoneRow}>
-                <View style={styles.countryBox}>
-                  <Text style={styles.flag}>🇵🇰</Text>
-                  <Text style={styles.countryCode}>+92</Text>
-                  <MaterialCommunityIcons name="chevron-down" size={18} color="#9ca3af" />
-                </View>
+              <Label text="I want to" />
+              <RoleSwitch value={role} onChange={setRole} />
+
+              <Label text="Full name" />
+              <View style={styles.field}>
                 <TextInput
-                  style={styles.phoneField}
+                  style={styles.input}
+                  placeholder="e.g. Ayesha Khan"
+                  placeholderTextColor="#94a3b8"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  autoComplete="name"
+                  maxLength={100}
+                />
+              </View>
+
+              <Label text="Email" />
+              <View style={styles.field}>
+                <MaterialCommunityIcons name="email-outline" size={20} color={MUTED} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#94a3b8"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  maxLength={254}
+                />
+              </View>
+
+              <Label text="Mobile number" />
+              <View style={styles.field}>
+                <MaterialCommunityIcons name="phone-outline" size={20} color={MUTED} />
+                <Text style={styles.prefix}>+92</Text>
+                <View style={styles.prefixDivider} />
+                <TextInput
+                  style={styles.input}
                   placeholder="300 1234567"
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor="#94a3b8"
                   value={phone}
                   onChangeText={(t) => setPhone(t.replace(/[^0-9]/g, ""))}
                   keyboardType="phone-pad"
+                  autoComplete="tel"
                   maxLength={11}
                 />
               </View>
 
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <Label text="Password" />
+              <PasswordField
+                value={password}
+                onChange={setPassword}
+                show={showPassword}
+                onToggle={() => setShowPassword((v) => !v)}
+                placeholder={`At least ${MIN_PASSWORD} characters`}
+                autoComplete="new-password"
+                onSubmit={handleSignUp}
+              />
 
-              <TouchableOpacity
-                style={[styles.waBtn, (loading || phone.replace(/^0/, "").length < 10) && styles.disabled]}
-                onPress={handleSendOtp}
-                disabled={loading || phone.replace(/^0/, "").length < 10}
-                activeOpacity={0.85}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <MaterialCommunityIcons name="whatsapp" size={22} color="#fff" />
-                    <Text style={styles.waBtnText}>Send OTP on WhatsApp</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
+              <ErrorText text={error} />
+              <PrimaryButton label="Create account" loading={loading === "primary"} onPress={handleSignUp} />
+              <OrDivider />
+              <GoogleButton loading={loading === "google"} onPress={handleGoogle} disabled={!!loading} />
 
-          {/* ── Step: OTP ── */}
-          {step === "otp" && (
-            <>
-              <Text style={styles.bigTitle}>Enter OTP</Text>
-              <Text style={styles.sentTo}>Sent to {displayPhone}</Text>
-
-              <View style={styles.otpRow}>
-                {otp.map((digit, i) => (
-                  <TextInput
-                    key={i}
-                    ref={(el) => {
-                      otpRefs.current[i] = el;
-                    }}
-                    style={[styles.otpBox, activeOtpIndex === i && styles.otpBoxActive]}
-                    value={digit}
-                    onChangeText={(v) => handleOtpChange(i, v)}
-                    onKeyPress={(e) => handleOtpKeyPress(i, e.nativeEvent.key)}
-                    onFocus={() => setActiveOtpIndex(i)}
-                    keyboardType="numeric"
-                    maxLength={i === 0 ? 6 : 1}
-                    textAlign="center"
-                    autoFocus={i === 0}
-                  />
-                ))}
-              </View>
-
-              {resendIn > 0 ? (
-                <Text style={styles.resendWait}>
-                  Resend in{" "}
-                  <Text style={styles.resendTimer}>
-                    0:{String(resendIn).padStart(2, "0")}
-                  </Text>
+              <Text style={styles.switchText}>
+                Already have an account?{" "}
+                <Text style={styles.switchLink} onPress={() => go("signin")}>
+                  Sign in
                 </Text>
-              ) : (
-                <TouchableOpacity onPress={handleSendOtp} style={{ alignSelf: "center" }}>
-                  <Text style={styles.resendLink}>Resend OTP</Text>
-                </TouchableOpacity>
-              )}
-
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+              </Text>
+              <GuestLink onPress={leave} />
+              <Footer />
             </>
           )}
 
-          {/* ── Step: Role + name ── */}
-          {step === "role" && (
+          {/* ── Verify email ── */}
+          {step === "verify" && (
             <>
-              <Text style={styles.bigTitle}>I want to...</Text>
-              <Text style={styles.sentTo}>Choose the option that best describes you</Text>
+              <IconBadge name="email-check-outline" />
+              <Text style={styles.title}>Check your email.</Text>
+              <Text style={styles.subtitle}>{codeNote}</Text>
 
-              <View style={styles.roleRow}>
-                <RoleCard
-                  icon="briefcase"
-                  title="Hire Workers"
-                  description="I want to hire skilled workers"
-                  selected={role === "client"}
-                  onPress={() => setRole("client")}
-                />
-                <RoleCard
-                  icon="hammer"
-                  title="Offer Services"
-                  description="I want to offer my skills and services"
-                  selected={role === "worker"}
-                  onPress={() => setRole("worker")}
-                />
-              </View>
+              <CodeInput value={code} onChange={setCode} onComplete={handleVerify} />
+              <ResendRow seconds={resendIn} loading={loading === "resend"} onResend={handleResend} />
 
-              {/* Full name */}
-              <View style={styles.fieldBox}>
-                <MaterialCommunityIcons name="account-outline" size={20} color="#6b7280" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Full name</Text>
-                  <TextInput
-                    style={styles.fieldInput}
-                    placeholder="Ahmed Raza"
-                    placeholderTextColor="#9ca3af"
-                    value={fullName}
-                    onChangeText={setFullName}
-                    maxLength={100}
-                  />
-                </View>
-              </View>
+              <ErrorText text={error} />
+              <PrimaryButton label="Verify email" loading={loading === "primary"} onPress={handleVerify} />
+              <Text style={styles.hint}>Can't find it? Check your spam or promotions folder.</Text>
+            </>
+          )}
 
-              {/* Verified identity (locked) */}
-              <View style={[styles.fieldBox, { opacity: 0.7 }]}>
-                {identity.icon ? (
-                  <MaterialCommunityIcons
-                    name={identity.icon}
-                    size={20}
-                    color={identity.icon === "google" ? "#EA4335" : "#6b7280"}
-                  />
-                ) : (
-                  <Text style={styles.flag}>🇵🇰</Text>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>{identity.label}</Text>
-                  <Text style={styles.fieldStatic} numberOfLines={1}>
-                    {identity.value}
-                  </Text>
-                </View>
-                <MaterialCommunityIcons name="lock-outline" size={16} color="#9ca3af" />
-              </View>
-
-              <Text style={styles.roleFootnote}>
-                You can add your phone, location and documents from your profile
-                once you're in.
+          {/* ── Forgot password ── */}
+          {step === "forgot" && (
+            <>
+              <IconBadge name="lock-reset" />
+              <Text style={styles.title}>Forgot password?</Text>
+              <Text style={styles.subtitle}>
+                Enter the mobile number or email on your account. We'll email you a code to reset
+                your password.
               </Text>
 
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <Label text="Mobile number or email" />
+              <IdentifierField value={identifier} onChange={setIdentifier} onSubmit={handleForgot} />
+
+              <ErrorText text={error} />
+              <PrimaryButton label="Send code" loading={loading === "primary"} onPress={handleForgot} />
+            </>
+          )}
+
+          {/* ── Reset password ── */}
+          {step === "reset" && (
+            <>
+              <IconBadge name="shield-key-outline" />
+              <Text style={styles.title}>Set a new password.</Text>
+              <Text style={styles.subtitle}>{codeNote}</Text>
+
+              <Label text="6-digit code" />
+              <CodeInput value={code} onChange={setCode} />
+              <ResendRow seconds={resendIn} loading={loading === "resend"} onResend={handleResend} />
+
+              <Label text="New password" />
+              <PasswordField
+                value={newPassword}
+                onChange={setNewPassword}
+                show={showPassword}
+                onToggle={() => setShowPassword((v) => !v)}
+                placeholder={`At least ${MIN_PASSWORD} characters`}
+                autoComplete="new-password"
+                onSubmit={handleReset}
+              />
+
+              <ErrorText text={error} />
+              <PrimaryButton label="Reset password" loading={loading === "primary"} onPress={handleReset} />
+            </>
+          )}
+
+          {/* ── New Google user: pick a role ── */}
+          {step === "googleRole" && (
+            <>
+              <IconBadge name="account-check-outline" />
+              <Text style={styles.title}>One last thing.</Text>
+              <Text style={styles.subtitle}>Tell us how you'll use Mazduuri.</Text>
+
+              <Label text="I want to" />
+              <RoleSwitch value={role} onChange={setRole} />
+
+              <Label text="Full name" />
+              <View style={styles.field}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Ayesha Khan"
+                  placeholderTextColor="#94a3b8"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  maxLength={100}
+                />
+              </View>
+
+              <ErrorText text={error} />
+              <PrimaryButton label="Continue" loading={loading === "primary"} onPress={finishGoogle} />
             </>
           )}
         </ScrollView>
-
-        {/* Bottom-pinned action */}
-        {bottomBarStep && (
-          <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={[
-                styles.primaryBtn,
-                (loading || (step === "otp" && otp.join("").length < 6)) && styles.disabled,
-              ]}
-              onPress={
-                step === "otp"
-                  ? handleVerifyPressed
-                  : step === "email"
-                    ? handleEmailContinue
-                    : handleContinuePressed
-              }
-              disabled={loading || (step === "otp" && otp.join("").length < 6)}
-              activeOpacity={0.85}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryBtnText}>
-                  {step === "otp"
-                    ? "Verify"
-                    : step === "email" && authMode === "login"
-                      ? "Log in"
-                      : "Continue"}
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-// ─── Role card ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function RoleCard({
-  icon,
-  title,
-  description,
-  selected,
-  onPress,
+/** Digits typed into the identifier field are a mobile number; send them as such. */
+function toIdentifier(raw: string): string {
+  const t = raw.trim();
+  if (t.includes("@")) return t.toLowerCase();
+  return t.replace(/[\s-]/g, "");
+}
+
+function looksLikeEmail(v: string) {
+  return /[a-zA-Z@]/.test(v);
+}
+
+// ─── Pieces ───────────────────────────────────────────────────────────────────
+
+function TrustRow() {
+  const faces = [
+    { bg: "#f97316", icon: "account-hard-hat" },
+    { bg: "#16a34a", icon: "account-wrench" },
+    { bg: "#2563eb", icon: "account-tie" },
+  ];
+  return (
+    <View style={styles.trustRow}>
+      <View style={styles.faces}>
+        {faces.map((f, i) => (
+          <View key={f.icon} style={[styles.face, { backgroundColor: f.bg, marginLeft: i === 0 ? 0 : -10 }]}>
+            <MaterialCommunityIcons name={f.icon} size={20} color="#fff" />
+          </View>
+        ))}
+      </View>
+      <MaterialCommunityIcons name="check-circle-outline" size={16} color={GREEN_DARK} />
+      <Text style={styles.trustText}>Trusted skilled hands</Text>
+    </View>
+  );
+}
+
+function Label({ text }: { text: string }) {
+  return <Text style={[styles.label, { marginTop: 18 }]}>{text}</Text>;
+}
+
+function ErrorText({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <View style={styles.errorBox}>
+      <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#dc2626" />
+      <Text style={styles.errorText}>{text}</Text>
+    </View>
+  );
+}
+
+function IdentifierField({
+  value,
+  onChange,
+  onSubmit,
 }: {
-  icon: string;
-  title: string;
-  description: string;
-  selected: boolean;
-  onPress: () => void;
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit?: () => void;
+}) {
+  const email = looksLikeEmail(value);
+  return (
+    <View style={styles.field}>
+      <MaterialCommunityIcons name={email ? "email-outline" : "phone-outline"} size={20} color={MUTED} />
+      {!email && (
+        <>
+          <Text style={styles.prefix}>+92</Text>
+          <View style={styles.prefixDivider} />
+        </>
+      )}
+      <TextInput
+        style={styles.input}
+        placeholder="300 1234567 or email"
+        placeholderTextColor="#94a3b8"
+        value={value}
+        onChangeText={onChange}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="username"
+        maxLength={254}
+        returnKeyType={onSubmit ? "go" : "next"}
+        onSubmitEditing={onSubmit}
+      />
+    </View>
+  );
+}
+
+function PasswordField({
+  value,
+  onChange,
+  show,
+  onToggle,
+  placeholder,
+  autoComplete,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  show: boolean;
+  onToggle: () => void;
+  placeholder: string;
+  autoComplete: "current-password" | "new-password";
+  onSubmit?: () => void;
 }) {
   return (
+    <View style={styles.field}>
+      <MaterialCommunityIcons name="lock-outline" size={20} color={MUTED} />
+      <TextInput
+        style={styles.input}
+        placeholder={placeholder}
+        placeholderTextColor="#94a3b8"
+        value={value}
+        onChangeText={onChange}
+        secureTextEntry={!show}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete={autoComplete}
+        maxLength={128}
+        returnKeyType="go"
+        onSubmitEditing={onSubmit}
+      />
+      <TouchableOpacity onPress={onToggle} hitSlop={8}>
+        <MaterialCommunityIcons name={show ? "eye-off-outline" : "eye-outline"} size={20} color={MUTED} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function RoleSwitch({ value, onChange }: { value: Role; onChange: (r: Role) => void }) {
+  const options: { key: Role; label: string; icon: string }[] = [
+    { key: "client", label: "Hire a worker", icon: "briefcase-outline" },
+    { key: "worker", label: "Find work", icon: "account-outline" },
+  ];
+  return (
+    <View style={styles.segment}>
+      {options.map((o) => {
+        const active = value === o.key;
+        return (
+          <TouchableOpacity
+            key={o.key}
+            style={[styles.segmentItem, active && styles.segmentItemActive]}
+            onPress={() => onChange(o.key)}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name={o.icon} size={18} color={active ? INK : MUTED} />
+            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{o.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+function PrimaryButton({ label, loading, onPress }: { label: string; loading: boolean; onPress: () => void }) {
+  return (
     <TouchableOpacity
-      style={[styles.roleCard, selected && styles.roleCardSelected]}
+      style={[styles.primaryBtn, loading && { opacity: 0.8 }]}
       onPress={onPress}
-      activeOpacity={0.8}
+      disabled={loading}
+      activeOpacity={0.85}
     >
-      <View style={[styles.roleIconCircle, selected && styles.roleIconCircleSelected]}>
-        <MaterialCommunityIcons name={icon} size={30} color={selected ? "#16a34a" : "#6b7280"} />
-      </View>
-      <Text style={styles.roleTitle}>{title}</Text>
-      <Text style={styles.roleDesc}>{description}</Text>
-      {selected ? (
-        <MaterialCommunityIcons name="check-circle" size={24} color="#16a34a" />
+      {loading ? (
+        <ActivityIndicator color="#fff" />
       ) : (
-        <View style={styles.roleRadio} />
+        <>
+          <Text style={styles.primaryText}>{label}</Text>
+          <MaterialCommunityIcons name="arrow-right" size={18} color="#fff" />
+        </>
       )}
     </TouchableOpacity>
+  );
+}
+
+function OrDivider() {
+  return (
+    <View style={styles.dividerRow}>
+      <View style={styles.dividerLine} />
+      <Text style={styles.dividerText}>or continue with</Text>
+      <View style={styles.dividerLine} />
+    </View>
+  );
+}
+
+function GoogleButton({ loading, onPress, disabled }: { loading: boolean; onPress: () => void; disabled: boolean }) {
+  return (
+    <TouchableOpacity
+      style={[styles.googleBtn, disabled && !loading && { opacity: 0.6 }]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.85}
+    >
+      {loading ? (
+        <ActivityIndicator color={MUTED} />
+      ) : (
+        <>
+          <View style={styles.gBadge}>
+            <Text style={styles.gText}>G</Text>
+          </View>
+          <Text style={styles.googleText}>Continue with Google</Text>
+        </>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+function GuestLink({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.guestBtn} onPress={onPress} hitSlop={8}>
+      <MaterialCommunityIcons name="account-outline" size={17} color={MUTED} />
+      <Text style={styles.guestText}>Continue as guest</Text>
+    </TouchableOpacity>
+  );
+}
+
+function Footer() {
+  return (
+    <View style={styles.footer}>
+      <MaterialCommunityIcons name="shield-check-outline" size={15} color={GREEN_DARK} />
+      <Text style={styles.footerText}>Your details stay safe with us</Text>
+      <MaterialCommunityIcons name="account-group-outline" size={15} color={MUTED} style={{ marginLeft: 12 }} />
+      <Text style={styles.footerText}>Across Pakistan</Text>
+    </View>
+  );
+}
+
+function IconBadge({ name }: { name: string }) {
+  return (
+    <View style={styles.iconBadge}>
+      <MaterialCommunityIcons name={name} size={30} color={GREEN_DARK} />
+    </View>
+  );
+}
+
+function ResendRow({ seconds, loading, onResend }: { seconds: number; loading: boolean; onResend: () => void }) {
+  return (
+    <View style={styles.resendRow}>
+      {seconds > 0 ? (
+        <Text style={styles.resendWait}>
+          Resend code in <Text style={styles.resendTimer}>0:{String(seconds).padStart(2, "0")}</Text>
+        </Text>
+      ) : loading ? (
+        <ActivityIndicator color={GREEN_DARK} />
+      ) : (
+        <TouchableOpacity onPress={onResend} hitSlop={8}>
+          <Text style={styles.link}>Resend code</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+/** Six boxes over one hidden input, so paste and SMS/email autofill just work. */
+function CodeInput({
+  value,
+  onChange,
+  onComplete,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onComplete?: () => void;
+}) {
+  const ref = useRef<TextInput>(null);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => ref.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <Pressable style={styles.codeRow} onPress={() => ref.current?.focus()}>
+      {Array.from({ length: 6 }).map((_, i) => {
+        const active = focused && (i === value.length || (i === 5 && value.length === 6));
+        return (
+          <View key={i} style={[styles.codeBox, active && styles.codeBoxActive, !!value[i] && styles.codeBoxFilled]}>
+            <Text style={styles.codeDigit}>{value[i] ?? ""}</Text>
+          </View>
+        );
+      })}
+      <TextInput
+        ref={ref}
+        value={value}
+        onChangeText={(t) => {
+          const digits = t.replace(/\D/g, "").slice(0, 6);
+          onChange(digits);
+          if (digits.length === 6) onComplete?.();
+        }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        keyboardType="number-pad"
+        textContentType="oneTimeCode"
+        autoComplete="one-time-code"
+        maxLength={6}
+        style={styles.codeHidden}
+        caretHidden
+      />
+    </Pressable>
   );
 }
 
@@ -755,198 +849,180 @@ function RoleCard({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
-  topBar: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
-  container: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24 },
+  container: { flexGrow: 1, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 28 },
 
-  // Phone step
-  logoContainer: { alignItems: "center", marginTop: 16, marginBottom: 30 },
-  logoImage: { width: 170, height: 76, marginBottom: 14 },
-  title: { fontSize: 26, fontWeight: "800", color: "#111827" },
-  subtitle: { fontSize: 14.5, color: "#6b7280", marginTop: 6, textAlign: "center" },
+  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 18 },
+  brand: { flexDirection: "row", alignItems: "center", gap: 10 },
+  brandIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandText: { fontSize: 22, fontWeight: "800", color: INK },
+  backBtn: { width: 40, height: 40, justifyContent: "center" },
 
-  phoneRow: { flexDirection: "row", gap: 10 },
-  countryBox: {
+  trustRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
+  faces: { flexDirection: "row", marginRight: 6 },
+  face: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trustText: { fontSize: 13, color: MUTED },
+
+  title: { fontSize: 32, fontWeight: "800", color: INK, letterSpacing: -0.5 },
+  subtitle: { fontSize: 15, lineHeight: 23, color: MUTED, marginTop: 8 },
+
+  labelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 18 },
+  label: { fontSize: 13.5, fontWeight: "700", color: INK, marginBottom: 8 },
+  link: { fontSize: 13.5, fontWeight: "700", color: GREEN },
+
+  field: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    height: 56,
-    backgroundColor: "#fff",
-  },
-  flag: { fontSize: 18 },
-  countryCode: { fontSize: 15.5, fontWeight: "600", color: "#111827" },
-  phoneField: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 14,
+    gap: 10,
+    minHeight: 50,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BORDER,
     paddingHorizontal: 16,
-    height: 56,
-    fontSize: 16,
-    color: "#111827",
     backgroundColor: "#fff",
   },
+  input: { flex: 1, fontSize: 15, color: INK, paddingVertical: 12 },
+  prefix: { fontSize: 15, fontWeight: "700", color: INK },
+  prefixDivider: { width: 1, height: 22, backgroundColor: BORDER },
 
-  waBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: "#16a34a",
-    borderRadius: 14,
-    height: 54,
-    marginTop: 20,
-  },
-  waBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-
-  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 24 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: "#e5e7eb" },
-  dividerText: { fontSize: 13, color: "#9ca3af" },
-
-  socialBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 14,
-    height: 54,
-    marginBottom: 12,
-    backgroundColor: "#fff",
-  },
-  socialBtnText: { fontSize: 15.5, fontWeight: "600", color: "#111827" },
-
-  textBtn: {
+  segment: { flexDirection: "row", padding: 4, borderRadius: 999, backgroundColor: "#f1f5f9" },
+  segmentItem: {
+    flex: 1,
+    height: 46,
+    borderRadius: 999,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 48,
   },
-  textBtnLabel: { fontSize: 15, fontWeight: "600", color: "#16a34a" },
-
-  modeToggle: { alignSelf: "center", marginTop: 20, paddingVertical: 6 },
-  modeToggleText: { fontSize: 14.5, color: "#16a34a", fontWeight: "600" },
-
-  roleFootnote: {
-    fontSize: 12.5,
-    color: "#6b7280",
-    lineHeight: 18,
-    marginTop: 2,
-  },
-
-  terms: {
-    fontSize: 12.5,
-    color: "#6b7280",
-    textAlign: "center",
-    marginTop: "auto",
-    paddingTop: 24,
-  },
-  termsLink: { color: "#16a34a", fontWeight: "600" },
-
-  // OTP step
-  bigTitle: { fontSize: 28, fontWeight: "800", color: "#111827", marginTop: 12 },
-  sentTo: { fontSize: 14.5, color: "#6b7280", marginTop: 8, marginBottom: 28 },
-  otpRow: { flexDirection: "row", gap: 9, justifyContent: "space-between" },
-  otpBox: {
-    flex: 1,
-    height: 60,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 14,
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#111827",
-    textAlign: "center",
+  segmentItemActive: {
     backgroundColor: "#fff",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  otpBoxActive: { borderColor: "#16a34a" },
-  resendWait: { fontSize: 14, color: "#6b7280", textAlign: "center", marginTop: 26 },
-  resendTimer: { color: "#16a34a", fontWeight: "700" },
-  resendLink: { fontSize: 14.5, color: "#16a34a", fontWeight: "700", marginTop: 26 },
+  segmentText: { fontSize: 15, fontWeight: "600", color: MUTED },
+  segmentTextActive: { color: INK },
 
-  // Role step
-  roleRow: { flexDirection: "row", gap: 12, marginBottom: 20 },
-  roleCard: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 18,
-    paddingVertical: 20,
-    paddingHorizontal: 12,
+  errorBox: {
+    flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
+    gap: 8,
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#fef2f2",
   },
-  roleCardSelected: { borderColor: "#16a34a", backgroundColor: "#f7fdf9" },
-  roleIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#f3f4f6",
+  errorText: { flex: 1, fontSize: 13.5, color: "#b91c1c", lineHeight: 19 },
+
+  primaryBtn: {
+    marginTop: 20,
+    height: 50,
+    borderRadius: 999,
+    backgroundColor: GREEN,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    gap: 8,
+    shadowColor: GREEN,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
-  roleIconCircleSelected: { backgroundColor: "#dcfce7" },
-  roleTitle: { fontSize: 15.5, fontWeight: "700", color: "#111827", textAlign: "center" },
-  roleDesc: {
-    fontSize: 12.5,
-    color: "#6b7280",
-    textAlign: "center",
-    lineHeight: 17,
-    marginTop: 5,
-    marginBottom: 14,
-    minHeight: 34,
+  primaryText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+
+  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 20 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: BORDER },
+  dividerText: { fontSize: 12.5, color: MUTED },
+
+  googleBtn: {
+    height: 50,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: "#fff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
-  roleRadio: {
+  gBadge: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    borderWidth: 2,
-    borderColor: "#d1d5db",
-  },
-
-  fieldBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 12,
-    backgroundColor: "#fff",
-    minHeight: 62,
-  },
-  fieldLabel: { fontSize: 11.5, color: "#9ca3af", marginBottom: 1 },
-  fieldInput: { fontSize: 15.5, color: "#111827", padding: 0 },
-  fieldStatic: { fontSize: 15.5, color: "#111827", fontWeight: "500" },
-
-  // Bottom bar
-  bottomBar: { paddingHorizontal: 24, paddingBottom: 10, paddingTop: 8 },
-  primaryBtn: {
-    backgroundColor: "#16a34a",
-    borderRadius: 14,
-    height: 54,
+    backgroundColor: "#f1f5f9",
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 17 },
-  disabled: { opacity: 0.5 },
+  gText: { fontSize: 12, fontWeight: "800", color: INK },
+  googleText: { fontSize: 15.5, fontWeight: "700", color: INK },
 
-  error: {
-    backgroundColor: "#fef2f2",
-    borderRadius: 10,
-    padding: 10,
+  switchText: { textAlign: "center", fontSize: 15, color: MUTED, marginTop: 22 },
+  switchLink: { color: GREEN, fontWeight: "700" },
+
+  guestBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     marginTop: 14,
-    color: "#ef4444",
-    fontSize: 13,
-    textAlign: "center",
+    paddingVertical: 6,
   },
+  guestText: { fontSize: 14, fontWeight: "600", color: MUTED, textDecorationLine: "underline" },
 
+  footer: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 18 },
+  footerText: { fontSize: 12, color: MUTED },
+
+  iconBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#dcfce7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  hint: { fontSize: 13, color: MUTED, textAlign: "center", marginTop: 16 },
+
+  codeRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 24 },
+  codeBox: {
+    width: 48,
+    height: 56,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  codeBoxActive: { borderColor: GREEN },
+  codeBoxFilled: { backgroundColor: "#f0fdf4", borderColor: "#86efac" },
+  codeDigit: { fontSize: 22, fontWeight: "800", color: INK },
+  codeHidden: { position: "absolute", opacity: 0, width: 1, height: 1 },
+
+  resendRow: { alignItems: "center", marginTop: 16, minHeight: 22 },
+  resendWait: { fontSize: 13.5, color: MUTED },
+  resendTimer: { fontWeight: "700", color: INK },
 });

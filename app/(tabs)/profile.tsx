@@ -4,9 +4,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Image,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -14,24 +14,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { useAuthStore } from "@/store/authStore";
-import { authApi, jobsApi } from "@/lib/api";
-import { useAppTranslation } from "@/hooks/useAppTranslation";
-import { signOutFromGoogle } from "@/lib/googleAuth";
-import { useSavedStore } from "@/store/savedStore";
-import { unregisterFromPushNotifications } from "@/lib/push";
-import { LANGUAGE_META } from "@/i18n";
+import { authApi, jobsApi, notificationsApi } from "@/lib/api";
+import { clearLocalSession } from "@/lib/session";
+import { LINKS } from "@/lib/links";
 import type { WorkerProfile, ClientProfile, Job } from "@/types";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated, user, setUser, clearUser } = useAuthStore();
-  const { t, language } = useAppTranslation();
+  const { isAuthenticated, user } = useAuthStore();
 
   const [profile, setProfile] = useState<WorkerProfile | ClientProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [switchingRole, setSwitchingRole] = useState(false);
   const [myJobs, setMyJobs] = useState<Job[] | null>(null);
+  const [unread, setUnread] = useState(0);
 
   // White status-bar icons over the green header while this tab is focused.
   // Rendered declaratively (gated on focus) so it stacks over the root
@@ -42,6 +38,17 @@ export default function ProfileScreen() {
       setFocused(true);
       return () => setFocused(false);
     }, [])
+  );
+
+  // Unread badge on the bell; refreshed whenever the tab comes back into view.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated) return;
+      notificationsApi
+        .list()
+        .then((p) => setUnread(p.unreadCount))
+        .catch(() => {});
+    }, [isAuthenticated])
   );
 
   useEffect(() => {
@@ -82,57 +89,7 @@ export default function ProfileScreen() {
     } catch {
       // ignore — clear locally regardless
     }
-    // Drop the cached Google session too, otherwise the next sign-in silently
-    // reuses this account instead of offering the picker.
-    await signOutFromGoogle();
-    // Detach this device first, or the signed-out account keeps receiving
-    // its notifications.
-    await unregisterFromPushNotifications();
-    // Saved hearts belong to the account, not the device.
-    useSavedStore.getState().clear();
-    clearUser();
-  }
-
-  async function handleSwitchRole() {
-    if (!user) return;
-    const newRole = user.role === "worker" ? "client" : "worker";
-    const label = newRole === "client" ? "Client" : "Worker";
-    Alert.alert(
-      `Switch to ${label}`,
-      `You will switch your account to ${label} mode. You can switch back anytime.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: `Switch to ${label}`,
-          onPress: async () => {
-            setSwitchingRole(true);
-            try {
-              const res = await authApi.switchRole(newRole);
-              setUser(res.user, res.token);
-              setProfile(null);
-              // If no profile for the new role, route to create
-              const hasNewProfile =
-                newRole === "worker"
-                  ? !!(res as unknown as { workerProfile: unknown }).workerProfile
-                  : !!(res as unknown as { clientProfile: unknown }).clientProfile;
-              if (!hasNewProfile) {
-                setTimeout(() => {
-                  router.push(
-                    newRole === "worker"
-                      ? "/profile/create-worker"
-                      : "/profile/create-client",
-                  );
-                }, 100);
-              }
-            } catch (e: unknown) {
-              Alert.alert("Error", e instanceof Error ? e.message : "Failed to switch role");
-            } finally {
-              setSwitchingRole(false);
-            }
-          },
-        },
-      ],
-    );
+    await clearLocalSession();
   }
 
   function goToEditProfile() {
@@ -188,7 +145,10 @@ export default function ProfileScreen() {
         ]
       : [
           { value: `${myJobs?.length ?? 0}`, label: "Jobs posted" },
-          { value: `${myJobs?.filter((j) => j.status === "open").length ?? 0}`, label: "Open" },
+          {
+            value: `${myJobs?.filter((j) => j.status === "in_progress" || j.status === "completed").length ?? 0}`,
+            label: "Hired",
+          },
           {
             value: `${myJobs?.reduce((sum, j) => sum + (j._count?.applications ?? 0), 0) ?? 0}`,
             label: "Applicants",
@@ -202,11 +162,22 @@ export default function ProfileScreen() {
         {/* ── Green header ── */}
         <View style={[styles.headerCard, { paddingTop: insets.top + 10 }]}>
           <View style={styles.headerRow}>
-            <View style={{ width: 40 }} />
+            <TouchableOpacity
+              style={styles.bellBtn}
+              onPress={() => router.push("/notifications")}
+              hitSlop={8}
+            >
+              <MaterialCommunityIcons name="bell-outline" size={24} color="#fff" />
+              {unread > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{unread > 9 ? "9+" : unread}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
             <Text style={styles.headerTitle}>Profile</Text>
             <TouchableOpacity
               style={styles.gearBtn}
-              onPress={() => router.push("/language-select")}
+              onPress={() => router.push("/settings")}
               hitSlop={8}
             >
               <MaterialCommunityIcons name="cog-outline" size={24} color="#fff" />
@@ -295,37 +266,24 @@ export default function ProfileScreen() {
             onPress={() => router.push("/saved")}
           />
 
-          <MenuItem
-            iconName="bell-outline"
-            label="Notifications"
-            onPress={() => router.push("/notifications")}
-          />
-
-          <MenuItem
-            iconName="web"
-            label={`${t("profile.language")} — ${LANGUAGE_META[language].nativeName}`}
-            onPress={() => router.push("/language-select")}
-          />
-
-          <MenuItem
-            iconName="swap-horizontal"
-            label={
-              switchingRole
-                ? "Switching…"
-                : user.role === "worker"
-                ? "Switch to Client Account"
-                : "Switch to Worker Account"
-            }
-            onPress={handleSwitchRole}
-            disabled={switchingRole}
-          />
+          {user.role === "worker" && workerProfile && (
+            <MenuItem
+              iconName="star-outline"
+              label="Reviews"
+              onPress={() => router.push(`/workers/${workerProfile.id}`)}
+            />
+          )}
 
           <MenuItem
             iconName="help-circle-outline"
             label="Help Center"
-            onPress={() =>
-              Alert.alert(t("profile.help"), "For support, contact us at support@mazduuri.pk")
-            }
+            onPress={() => Linking.openURL(LINKS.website).catch(() => {})}
+          />
+
+          <MenuItem
+            iconName="cog-outline"
+            label="Settings"
+            onPress={() => router.push("/settings")}
           />
 
           <MenuItem
@@ -415,6 +373,22 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "700", color: "#fff" },
   gearBtn: { width: 40, height: 40, alignItems: "flex-end", justifyContent: "center" },
+  bellBtn: { width: 40, height: 40, alignItems: "flex-start", justifyContent: "center" },
+  bellBadge: {
+    position: "absolute",
+    top: 4,
+    left: 14,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: "#ef4444",
+    borderWidth: 2,
+    borderColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
 
   avatarWrap: { marginBottom: 14 },
   avatarRing: {
@@ -504,5 +478,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
   },
-  menuLabel: { flex: 1, fontSize: 15, fontWeight: "500" },
+  menuLabel: { flex: 1, fontSize: 15.5, fontWeight: "500" },
 });

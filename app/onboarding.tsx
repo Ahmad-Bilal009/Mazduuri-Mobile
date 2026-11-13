@@ -11,6 +11,8 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ONBOARDED_KEY } from "@/lib/onboarding";
 
 const SCREEN_W = Dimensions.get("window").width;
 
@@ -54,7 +56,9 @@ export default function OnboardingScreen() {
   const isLast = index === SLIDES.length - 1;
 
   function finish() {
-    router.replace("/welcome");
+    // Seen once is enough; next launch goes straight to login.
+    AsyncStorage.setItem(ONBOARDED_KEY, "1").catch(() => {});
+    router.replace("/auth");
   }
 
   function handleNext() {
